@@ -28,8 +28,7 @@ void main()
 	outUV.t = 1.0 - outUV.t;
 
 	// Vertex position in world space
-	vec4 tmpPos = inPos;
-	outWorldPos = vec3(ubo.model * tmpPos);
+	outWorldPos = inPos.xyz;
 	// GL to Vulkan coord space
 	outWorldPos.y = -outWorldPos.y;
 	

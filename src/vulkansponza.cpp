@@ -71,6 +71,7 @@ struct SceneMesh
 
 	uint32_t indexCount;
 
+	// Better move to material and share among meshes with same material
 	VkDescriptorSet descriptorSet;
 
 	SceneMaterial *material;
@@ -388,6 +389,23 @@ public:
 
 	bool debugDisplay = false;
 
+	struct
+	{
+		struct 
+		{
+			bool left = false;
+			bool right = false;
+			bool up = false;
+			bool down = false;
+		} keys;
+
+		bool moving()
+		{
+			return keys.left || keys.right || keys.up || keys.down;
+		}
+
+	} camera;
+
 	struct {
 		vkTools::VulkanTexture colorMap;
 	} textures;
@@ -472,13 +490,13 @@ public:
 
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
-		zoom = -8.0f;
-		rotation = { 0.0f, 90.0f, 0.0f };
+		rotation = { 0.0f, -90.0f, 0.0f };
 		cameraPos = { 0.0f, 10.0f, 0.0f };
 		width = 1920;
 		height = 1080;
 		title = "Vulkan Sponza - © 2016 by Sascha Willems";
-		timerSpeed = 1.0f;
+		timerSpeed = 0.5f;
+		rotationSpeed = 0.15f;
 #if defined(_WIN32)
 		setupConsole("VulkanExample");
 #endif
@@ -1354,7 +1372,7 @@ public:
 		VkPipelineRasterizationStateCreateInfo rasterizationState =
 			vkTools::initializers::pipelineRasterizationStateCreateInfo(
 				VK_POLYGON_MODE_FILL,
-				VK_CULL_MODE_NONE,
+				VK_CULL_MODE_BACK_BIT,
 				VK_FRONT_FACE_CLOCKWISE,
 				0);
 
@@ -1505,7 +1523,7 @@ public:
 	{
 		uboOffscreenVS.projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 256.0f);
 
-		uboOffscreenVS.view = glm::translate(glm::mat4(), glm::vec3(0.0f, 0.0f, zoom));
+		uboOffscreenVS.view = glm::translate(glm::mat4(), glm::vec3(0.0f, 0.0f, 0.0f));
 		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
 		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
 		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -1531,24 +1549,25 @@ public:
 
 		for (int32_t i = 0; i < lightColors.size(); i++)
 		{
-			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 1.0f, -2.5f, 0.0f);
+			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 10.0f, -5.0f, 0.0f);
 			uboFragmentLights.lights[i].color = lightColors[i];
 			uboFragmentLights.lights[i].radius = 100.0f;
 			uboFragmentLights.lights[i].linearFalloff = 0.004f;
 			uboFragmentLights.lights[i].quadraticFalloff = 0.003f;
 		}
 
-		// Fire
-		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 7.0f, -18.0f, 0.0f);
-		uboFragmentLights.lights[5].position.x += (2.5f * sin(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[5].position.z += (2.5f * cos(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[5].color = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f);
+		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 15.0f, -18.0f, 0.0f);
+		uboFragmentLights.lights[5].position.x += (1.5f * sin(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[5].position.z += (1.5f * cos(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[5].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
 		uboFragmentLights.lights[5].radius = 100.0f;
 		uboFragmentLights.lights[5].linearFalloff = 0.004f;
 		uboFragmentLights.lights[5].quadraticFalloff = 0.003f;
 
-		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 7.0f, 14.0f, 0.0f);
-		uboFragmentLights.lights[6].color = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f);
+		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 15.0f, 14.0f, 0.0f);
+		uboFragmentLights.lights[6].position.x += (1.5f * cos(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[6].position.z += (1.5f * sin(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[6].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
 		uboFragmentLights.lights[6].radius = 100.0f;
 		uboFragmentLights.lights[6].linearFalloff = 0.004f;
 		uboFragmentLights.lights[6].quadraticFalloff = 0.003f;
@@ -1597,6 +1616,13 @@ public:
 			vkDeviceWaitIdle(device);
 			updateUniformBufferDeferredLights();
 		}
+		if (camera.moving())
+		{
+			// todo : bad
+			vkDeviceWaitIdle(device);
+			move();
+			updateUniformBufferDeferredMatrices();
+		}
 	}
 
 	virtual void viewChanged()
@@ -1612,6 +1638,70 @@ public:
 		reBuildCommandBuffers();
 		updateUniformBuffersScreen();
 	}
+
+	void move()
+	{
+		glm::vec3 camFront;
+		camFront.x = -cos(glm::radians(rotation.x)) * sin(glm::radians(rotation.y));
+		camFront.y = sin(glm::radians(rotation.x));
+		camFront.z = cos(glm::radians(rotation.x)) * cos(glm::radians(rotation.y));
+		camFront = glm::normalize(camFront);
+
+		float camSpeed = frameTimer * 25.0f;
+
+		if (camera.keys.up)
+			cameraPos += camFront * camSpeed;
+		if (camera.keys.down)
+			cameraPos -= camFront * camSpeed;
+		if (camera.keys.left)
+			cameraPos -= glm::normalize(glm::cross(camFront, glm::vec3(0.0f, 1.0f, 0.0f))) * camSpeed;
+		if (camera.keys.right)
+			cameraPos += glm::normalize(glm::cross(camFront, glm::vec3(0.0f, 1.0f, 0.0f))) * camSpeed;
+	}
+
+	void handleEvent(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+	{
+		if (uMsg == WM_KEYDOWN)
+		{
+			switch (wParam)
+			{
+			case 0x57:
+				camera.keys.up = true;
+				break;
+			case 0x53:
+				camera.keys.down = true;
+				break;
+			case 0x41:
+				camera.keys.left = true;
+				break;
+			case 0x44:
+				camera.keys.right = true;
+				break;
+			case 0x54:
+				toggleDebugDisplay();
+				break;
+			}
+		}
+		if (uMsg == WM_KEYUP)
+		{
+			switch (wParam)
+			{
+			case 0x57:
+				camera.keys.up = false;
+				break;
+			case 0x53:
+				camera.keys.down = false;
+				break;
+			case 0x41:
+				camera.keys.left = false;
+				break;
+			case 0x44:
+				camera.keys.right = false;
+				break;
+			}
+		}
+	}
+
 };
 
 VulkanExample *vulkanExample;
@@ -1622,15 +1712,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	if (vulkanExample != NULL)
 	{
 		vulkanExample->handleMessages(hWnd, uMsg, wParam, lParam);
-		if (uMsg == WM_KEYDOWN)
-		{
-			switch (wParam)
-			{
-			case 0x44:
-				vulkanExample->toggleDebugDisplay();
-				break;
-			}
-		}
+		vulkanExample->handleEvent(hWnd, uMsg, wParam, lParam);
 	}
 	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
 }
