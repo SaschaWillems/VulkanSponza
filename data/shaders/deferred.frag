@@ -34,8 +34,8 @@ void main()
     vec3 normal = texture(samplerNormal, inUV).rgb;
     vec4 albedo = texture(samplerAlbedo, inUV);
     
-	#define lightCount 5
-	#define ambient 0.05
+	#define lightCount 7
+	#define ambient 0.00
 	#define specularStrength 0.15
 	
 	// Ambient part
@@ -54,8 +54,7 @@ void main()
 			// Get vector from current light source to fragment position
             vec3 lightVec = normalize(ubo.lights[i].position.xyz - fragPos);
             // Diffuse part
-            //vec3 diffuse = max(dot(normal, lightVec), 0.0) * albedo.rgb * ubo.lights[i].color.rgb;
-            vec3 diffuse = max(dot(normal, lightVec), 0.0) * ubo.lights[i].color.rgb;
+            vec3 diffuse = max(dot(normal, lightVec), 0.0) * albedo.rgb * ubo.lights[i].color.rgb;
             // Specular part (specular texture part stored in albedo alpha channel)
             vec3 halfVec = normalize(lightVec + viewVec);  
             vec3 specular = ubo.lights[i].color.rgb * pow(max(dot(normal, halfVec), 0.0), 16.0) * albedo.a * specularStrength;
@@ -67,8 +66,4 @@ void main()
     }    	
    
   outFragcolor = vec4(fragcolor, 1.0);	
-  
-  // debug
-  
-  //outFragcolor.rgb = normal;
 }

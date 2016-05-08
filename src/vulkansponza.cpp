@@ -27,7 +27,7 @@
 #define ENABLE_VALIDATION false
 
 // Texture properties
-#define TEX_DIM 1024
+#define TEX_DIM 2048
 #define TEX_FILTER VK_FILTER_LINEAR
 
 // Offscreen frame buffer properties
@@ -70,6 +70,10 @@ struct SceneMesh
 	VkDeviceMemory indexMemory;
 
 	uint32_t indexCount;
+
+	VkDescriptorSet descriptorSet;
+
+	SceneMaterial *material;
 };
 
 VkPhysicalDeviceMemoryProperties deviceMemProps;
@@ -95,6 +99,12 @@ class Scene
 private:
 	VkDevice device;
 	VkQueue queue;
+	
+	// todo 
+	vkTools::UniformData *defaultUBO;
+	
+	VkDescriptorPool descriptorPool;
+
 	vkTools::VulkanTextureLoader *textureLoader;
 
 	const aiScene* aScene;
@@ -118,7 +128,12 @@ private:
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_DIFFUSE) > 0)
 			{
 				std::cout << "  Diffuse: \"" << texturefile.C_Str() << "\"" << std::endl;
-				textureLoader->loadTexture("data/sponza/background.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
+				textureLoader->loadTexture("../data/" + std::string(texturefile.C_Str()), VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
+			}
+			else
+			{
+				std::cout << "  Material has no diffuse, using dummy texture!" << std::endl;
+				textureLoader->loadTexture("../data/sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
 			}
 			// Specular
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_SPECULAR) > 0)
@@ -144,7 +159,7 @@ private:
 		}
 	}
 
-	void loadMeshes()
+	void loadMeshes()		
 	{
 		meshes.resize(aScene->mNumMeshes);
 		for (uint32_t i = 0; i < meshes.size(); i++)
@@ -155,6 +170,8 @@ private:
 			std::cout << "	Material: \"" << materials[aMesh->mMaterialIndex].name << "\"" << std::endl;
 			std::cout << "	Faces: " << aMesh->mNumFaces << std::endl;
 			
+			meshes[i].material = &materials[aMesh->mMaterialIndex];
+
 			// Vertices
 			std::vector<Vertex> vertices;			
 			vertices.resize(aMesh->mNumVertices);
@@ -225,6 +242,92 @@ private:
 
 			// todo : staging
 		}
+
+		// Generate descriptor sets for all meshes
+		// todo : think about a nicer solution, better suited per material?
+
+		// Decriptor pool
+		std::vector<VkDescriptorPoolSize> poolSizes;
+		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, meshes.size()));
+		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshes.size()) /* * num_stages */);
+
+		VkDescriptorPoolCreateInfo descriptorPoolInfo =
+			vkTools::initializers::descriptorPoolCreateInfo(
+				poolSizes.size(),
+				poolSizes.data(),
+				meshes.size());
+
+		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+
+		// Shared descriptor set layout
+		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
+		// Binding 0 : UBO
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				VK_SHADER_STAGE_VERTEX_BIT,
+				0));
+		// Binding 1 : Diffuse
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			1));
+		// todo : Additional maps...
+
+		VkDescriptorSetLayoutCreateInfo descriptorLayout =
+			vkTools::initializers::descriptorSetLayoutCreateInfo(
+				setLayoutBindings.data(),
+				setLayoutBindings.size());
+
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+
+		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+			vkTools::initializers::pipelineLayoutCreateInfo(
+				&descriptorSetLayout,
+				1);
+
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+		// Descriptor sets
+		for (uint32_t i = 0; i < meshes.size(); i++)
+		{
+			// Descriptor set
+			VkDescriptorSetAllocateInfo allocInfo =
+				vkTools::initializers::descriptorSetAllocateInfo(
+					descriptorPool,
+					&descriptorSetLayout,
+					1);
+
+			// Background
+			vkTools::checkResult(vkAllocateDescriptorSets(device, &allocInfo, &meshes[i].descriptorSet));
+
+			VkDescriptorImageInfo texDescriptor =
+				vkTools::initializers::descriptorImageInfo(
+					meshes[i].material->diffuse.sampler,
+					meshes[i].material->diffuse.view,
+					VK_IMAGE_LAYOUT_GENERAL);
+
+			// todo : additional maps
+
+			std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+
+			// Binding 0 : Vertex shader uniform buffer
+			writeDescriptorSets.push_back(
+				vkTools::initializers::writeDescriptorSet(
+					meshes[i].descriptorSet,
+					VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					0,
+					&defaultUBO->descriptor));
+
+			// Binding 1 : Color map 
+			writeDescriptorSets.push_back(
+				vkTools::initializers::writeDescriptorSet(
+					meshes[i].descriptorSet,
+					VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					1,
+					&texDescriptor));
+
+			vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+		}
 	}
 
 public:
@@ -232,11 +335,16 @@ public:
 	std::vector<SceneMaterial> materials;
 	std::vector<SceneMesh> meshes;
 
-	Scene(VkDevice device, VkQueue queue, vkTools::VulkanTextureLoader *textureloader)
+	// Same for all meshes in the scene
+	VkDescriptorSetLayout descriptorSetLayout;
+	VkPipelineLayout pipelineLayout;
+
+	Scene(VkDevice device, VkQueue queue, vkTools::VulkanTextureLoader *textureloader, vkTools::UniformData *defaultUBO)
 	{
 		this->device = device;
 		this->queue = queue;
 		this->textureLoader = textureloader;
+		this->defaultUBO = defaultUBO;
 	}
 
 	void load(std::string filename)
@@ -310,7 +418,7 @@ public:
 	};
 
 	struct {
-		Light lights[5];
+		Light lights[7];
 		glm::vec4 viewPos;
 	} uboFragmentLights;
 
@@ -367,7 +475,10 @@ public:
 		zoom = -8.0f;
 		rotation = { 0.0f, 90.0f, 0.0f };
 		cameraPos = { 0.0f, 10.0f, 0.0f };
+		width = 1920;
+		height = 1080;
 		title = "Vulkan Sponza - © 2016 by Sascha Willems";
+		timerSpeed = 1.0f;
 #if defined(_WIN32)
 		setupConsole("VulkanExample");
 #endif
@@ -833,16 +944,16 @@ public:
 			0);
 		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.offscreen, 0, 1, &descriptorSets.offscreen, 0, NULL);
 		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.offscreen);
 
 		VkDeviceSize offsets[1] = { 0 };
 
-		for (uint32_t i = 0; i < scene->meshes.size(); i++)
+		for (auto mesh : scene->meshes)
 		{
-			vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &scene->meshes[i].vertexBuffer, offsets);
-			vkCmdBindIndexBuffer(offScreenCmdBuffer, scene->meshes[i].indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-			vkCmdDrawIndexed(offScreenCmdBuffer, scene->meshes[i].indexCount, 1, 0, 0, 0);
+			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
+			vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &mesh.vertexBuffer, offsets);
+			vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 		}
 
 		vkCmdEndRenderPass(offScreenCmdBuffer);
@@ -1420,12 +1531,27 @@ public:
 
 		for (int32_t i = 0; i < lightColors.size(); i++)
 		{
-			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 1.0f, 0.0f, 0.0f);
+			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 1.0f, -2.5f, 0.0f);
 			uboFragmentLights.lights[i].color = lightColors[i];
 			uboFragmentLights.lights[i].radius = 100.0f;
 			uboFragmentLights.lights[i].linearFalloff = 0.004f;
 			uboFragmentLights.lights[i].quadraticFalloff = 0.003f;
 		}
+
+		// Fire
+		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 7.0f, -18.0f, 0.0f);
+		uboFragmentLights.lights[5].position.x += (2.5f * sin(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[5].position.z += (2.5f * cos(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[5].color = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f);
+		uboFragmentLights.lights[5].radius = 100.0f;
+		uboFragmentLights.lights[5].linearFalloff = 0.004f;
+		uboFragmentLights.lights[5].quadraticFalloff = 0.003f;
+
+		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 7.0f, 14.0f, 0.0f);
+		uboFragmentLights.lights[6].color = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f);
+		uboFragmentLights.lights[6].radius = 100.0f;
+		uboFragmentLights.lights[6].linearFalloff = 0.004f;
+		uboFragmentLights.lights[6].quadraticFalloff = 0.003f;
 
 		uboFragmentLights.viewPos = glm::vec4(0.0f, 0.0f, -zoom, 0.0f);
 
@@ -1440,11 +1566,6 @@ public:
 	{
 		VulkanExampleBase::prepare();
 
-		// todo : sep func
-		deviceMemProps = deviceMemoryProperties;
-		scene = new Scene(device, queue, textureLoader);
-		scene->load(getAssetPath() + "sponza.obj");
-
 		loadTextures();
 		generateQuads();
 		setupVertexDescriptions();
@@ -1455,6 +1576,12 @@ public:
 		preparePipelines();
 		setupDescriptorPool();
 		setupDescriptorSet();
+
+		// todo : sep func
+		deviceMemProps = deviceMemoryProperties;
+		scene = new Scene(device, queue, textureLoader, &uniformData.vsOffscreen);
+		scene->load(getAssetPath() + "sponza.obj");
+
 		buildCommandBuffers();
 		buildDeferredCommandBuffer();
 		prepared = true;
@@ -1464,19 +1591,24 @@ public:
 	{
 		if (!prepared)
 			return;
-		vkDeviceWaitIdle(device);
 		draw();
-		vkDeviceWaitIdle(device);
+		if (!paused)
+		{
+			vkDeviceWaitIdle(device);
+			updateUniformBufferDeferredLights();
+		}
 	}
 
 	virtual void viewChanged()
 	{
+		vkDeviceWaitIdle(device);
 		updateUniformBufferDeferredMatrices();
 	}
 
 	void toggleDebugDisplay()
 	{
 		debugDisplay = !debugDisplay;
+		vkDeviceWaitIdle(device);
 		reBuildCommandBuffers();
 		updateUniformBuffersScreen();
 	}
