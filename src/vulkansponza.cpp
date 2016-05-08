@@ -352,7 +352,7 @@ public:
 	{
 		Assimp::Importer Importer;
 
-		int flags = aiProcess_FlipWindingOrder | aiProcess_Triangulate | aiProcess_PreTransformVertices | aiProcess_CalcTangentSpace;// | aiProcess_GenSmoothNormals;
+		int flags = aiProcess_FlipWindingOrder | aiProcess_PreTransformVertices | aiProcess_CalcTangentSpace;// | aiProcess_GenSmoothNormals;
 
 #if defined(__ANDROID__)
 		AAsset* asset = AAssetManager_open(assetManager, filename.c_str(), AASSET_MODE_STREAMING);
@@ -1549,14 +1549,14 @@ public:
 
 		for (int32_t i = 0; i < lightColors.size(); i++)
 		{
-			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 10.0f, -5.0f, 0.0f);
+			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 10.0f, 0.0f, 0.0f);
 			uboFragmentLights.lights[i].color = lightColors[i];
 			uboFragmentLights.lights[i].radius = 100.0f;
 			uboFragmentLights.lights[i].linearFalloff = 0.004f;
 			uboFragmentLights.lights[i].quadraticFalloff = 0.003f;
 		}
 
-		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 15.0f, -18.0f, 0.0f);
+		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 15.0f, -13.0f, 0.0f);
 		uboFragmentLights.lights[5].position.x += (1.5f * sin(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[5].position.z += (1.5f * cos(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[5].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
@@ -1564,7 +1564,7 @@ public:
 		uboFragmentLights.lights[5].linearFalloff = 0.004f;
 		uboFragmentLights.lights[5].quadraticFalloff = 0.003f;
 
-		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 15.0f, 14.0f, 0.0f);
+		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 15.0f, 9.0f, 0.0f);
 		uboFragmentLights.lights[6].position.x += (1.5f * cos(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[6].position.z += (1.5f * sin(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[6].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
