@@ -57,8 +57,7 @@ struct SceneMaterial
 	vkTools::VulkanTexture diffuse;
 	vkTools::VulkanTexture specular;
 	vkTools::VulkanTexture bump;
-	// todo : combine in texture (put mask into alpha)
-	vkTools::VulkanTexture opacity;
+	bool hasAlpha = false;
 };
 
 struct SceneMesh
@@ -153,6 +152,7 @@ private:
 			{
 				aScene->mMaterials[i]->GetTexture(aiTextureType_OPACITY, 0, &texturefile);
 				std::cout << "  Opacity: \"" << texturefile.C_Str() << "\"" << std::endl;
+				materials[i].hasAlpha = true;
 			}
 
 			// todo : load actual texture
@@ -264,9 +264,9 @@ private:
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
 		// Binding 0 : UBO
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				VK_SHADER_STAGE_VERTEX_BIT,
-				0));
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			VK_SHADER_STAGE_VERTEX_BIT,
+			0));
 		// Binding 1 : Diffuse
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -458,11 +458,14 @@ public:
 	} pipelineLayouts;
 
 	struct {
+		VkDescriptorSet deferred;
 		VkDescriptorSet offscreen;
 	} descriptorSets;
 
-	VkDescriptorSet descriptorSet;
-	VkDescriptorSetLayout descriptorSetLayout;
+	struct {
+		VkDescriptorSetLayout deferred;
+		VkDescriptorSetLayout offscreen;
+	} descriptorSetLayouts;
 
 	// Framebuffer for offscreen rendering
 	struct FrameBufferAttachment {
@@ -541,7 +544,8 @@ public:
 		vkDestroyPipelineLayout(device, pipelineLayouts.deferred, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayouts.offscreen, nullptr);
 
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.deferred, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.offscreen, nullptr);
 
 		// Meshes
 		vkMeshLoader::freeMeshBufferResources(device, &meshes.quad);
@@ -968,11 +972,27 @@ public:
 
 		for (auto mesh : scene->meshes)
 		{
+			if (mesh.material->hasAlpha)
+			{
+				continue;
+			}
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
 			vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &mesh.vertexBuffer, offsets);
 			vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 		}
+
+		for (auto mesh : scene->meshes)
+		{
+			if (mesh.material->hasAlpha)
+			{
+				vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
+				vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &mesh.vertexBuffer, offsets);
+				vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+				vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
+			}
+		}
+
 
 		vkCmdEndRenderPass(offScreenCmdBuffer);
 
@@ -1044,7 +1064,7 @@ public:
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
 			VkDeviceSize offsets[1] = { 0 };
-			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.deferred, 0, 1, &descriptorSet, 0, NULL);
+			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.deferred, 0, 1, &descriptorSets.deferred, 0, NULL);
 
 			if (debugDisplay)
 			{
@@ -1221,50 +1241,68 @@ public:
 	void setupDescriptorSetLayout()
 	{
 		// Deferred shading layout
-		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
-		{
-			// Binding 0 : Vertex shader uniform buffer
-			vkTools::initializers::descriptorSetLayoutBinding(
+		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
+
+		// Binding 0 : Vertex shader uniform buffer
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				VK_SHADER_STAGE_VERTEX_BIT,
-				0),
-			// Binding 1 : Position texture target / Scene colormap
-			vkTools::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				VK_SHADER_STAGE_FRAGMENT_BIT,
-				1),
-			// Binding 2 : Normals texture target
-			vkTools::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				VK_SHADER_STAGE_FRAGMENT_BIT,
-				2),
-			// Binding 3 : Albedo texture target
-			vkTools::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				VK_SHADER_STAGE_FRAGMENT_BIT,
-				3),
-			// Binding 4 : Fragment shader uniform buffer
-			vkTools::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				VK_SHADER_STAGE_FRAGMENT_BIT,
-				4),
-		};
+			VK_SHADER_STAGE_VERTEX_BIT,
+			0));
+		// Binding 1 : Position texture target / Scene colormap
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			1));
+		// Binding 2 : Normals texture target
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			2));
+		// Binding 3 : Albedo texture target
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			3));
+		// Binding 4 : Fragment shader uniform buffer
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			4));
 
 		VkDescriptorSetLayoutCreateInfo descriptorLayout =
 			vkTools::initializers::descriptorSetLayoutCreateInfo(
 				setLayoutBindings.data(),
 				setLayoutBindings.size());
 
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.deferred));
 
 		VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
 			vkTools::initializers::pipelineLayoutCreateInfo(
-				&descriptorSetLayout,
+				&descriptorSetLayouts.deferred,
 				1);
 
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayouts.deferred));
 
 		// Offscreen (scene) rendering pipeline layout
+		setLayoutBindings.clear();
+		// Binding 0 : Vertex shader uniform buffer
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			VK_SHADER_STAGE_VERTEX_BIT,
+			0));
+		// Binding 1 : Position texture target / Scene colormap
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			1));
+
+		descriptorLayout.pBindings = setLayoutBindings.data();
+		descriptorLayout.bindingCount = setLayoutBindings.size();
+
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.offscreen));
+
+		pPipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayouts.offscreen;
+
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayouts.offscreen));
 	}
 
@@ -1274,10 +1312,10 @@ public:
 		VkDescriptorSetAllocateInfo allocInfo =
 			vkTools::initializers::descriptorSetAllocateInfo(
 				descriptorPool,
-				&descriptorSetLayout,
+				&descriptorSetLayouts.deferred,
 				1);
 
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.deferred));
 
 		// Image descriptor for the offscreen texture targets
 		VkDescriptorImageInfo texDescriptorPosition =
@@ -1302,31 +1340,31 @@ public:
 		{
 			// Binding 0 : Vertex shader uniform buffer
 			vkTools::initializers::writeDescriptorSet(
-			descriptorSet,
+				descriptorSets.deferred,
 				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 				0,
 				&uniformData.vsFullScreen.descriptor),
 			// Binding 1 : Position texture target
 			vkTools::initializers::writeDescriptorSet(
-				descriptorSet,
+				descriptorSets.deferred,
 				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				1,
 				&texDescriptorPosition),
 			// Binding 2 : Normals texture target
 			vkTools::initializers::writeDescriptorSet(
-				descriptorSet,
+				descriptorSets.deferred,
 				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				2,
 				&texDescriptorNormal),
 			// Binding 3 : Albedo texture target
 			vkTools::initializers::writeDescriptorSet(
-				descriptorSet,
+				descriptorSets.deferred,
 				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				3,
 				&texDescriptorAlbedo),
 			// Binding 4 : Fragment shader uniform buffer
 			vkTools::initializers::writeDescriptorSet(
-				descriptorSet,
+				descriptorSets.deferred,
 				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 				4,
 				&uniformData.fsLights.descriptor),
@@ -1335,6 +1373,9 @@ public:
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
 		// Offscreen (scene)
+
+		allocInfo.pSetLayouts = &descriptorSetLayouts.deferred;
+
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.offscreen));
 
 		VkDescriptorImageInfo texDescriptorSceneColormap =
@@ -1347,7 +1388,7 @@ public:
 		{
 			// Binding 0 : Vertex shader uniform buffer
 			vkTools::initializers::writeDescriptorSet(
-			descriptorSets.offscreen,
+				descriptorSets.offscreen,
 				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 				0,
 				&uniformData.vsOffscreen.descriptor),
@@ -1458,6 +1499,17 @@ public:
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE)
 		};
+
+		for (uint32_t i = 0; i < blendAttachmentStates.size(); i++)
+		{
+			blendAttachmentStates[i].blendEnable = VK_TRUE;
+			blendAttachmentStates[i].colorBlendOp = VK_BLEND_OP_ADD;
+			blendAttachmentStates[i].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			blendAttachmentStates[i].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			blendAttachmentStates[i].alphaBlendOp = VK_BLEND_OP_ADD;
+			blendAttachmentStates[i].srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			blendAttachmentStates[i].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		}
 
 		colorBlendState.attachmentCount = blendAttachmentStates.size();
 		colorBlendState.pAttachments = blendAttachmentStates.data();
