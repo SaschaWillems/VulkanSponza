@@ -4,4 +4,6 @@ glslangvalidator -V deferred.vert -o deferred.vert.spv
 glslangvalidator -V deferred.frag -o deferred.frag.spv
 glslangvalidator -V mrt.vert -o mrt.vert.spv
 glslangvalidator -V mrt.frag -o mrt.frag.spv
+glslangvalidator -V mrt_discard.frag -o mrt_discard.frag.spv
+
 

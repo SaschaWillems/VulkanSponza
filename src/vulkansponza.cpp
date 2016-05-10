@@ -448,8 +448,11 @@ public:
 
 	struct {
 		VkPipeline deferred;
-		VkPipeline offscreen;
 		VkPipeline debug;
+		struct {
+			VkPipeline solid;
+			VkPipeline blend;
+		} scene;
 	} pipelines;
 
 	struct {
@@ -538,7 +541,8 @@ public:
 		vkDestroyFramebuffer(device, offScreenFrameBuf.frameBuffer, nullptr);
 
 		vkDestroyPipeline(device, pipelines.deferred, nullptr);
-		vkDestroyPipeline(device, pipelines.offscreen, nullptr);
+		vkDestroyPipeline(device, pipelines.scene.solid, nullptr);
+		vkDestroyPipeline(device, pipelines.scene.blend, nullptr);
 		vkDestroyPipeline(device, pipelines.debug, nullptr);
 
 		vkDestroyPipelineLayout(device, pipelineLayouts.deferred, nullptr);
@@ -966,7 +970,7 @@ public:
 			0);
 		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.offscreen);
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene.solid);
 
 		VkDeviceSize offsets[1] = { 0 };
 
@@ -981,6 +985,8 @@ public:
 			vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 		}
+
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene.blend);
 
 		for (auto mesh : scene->meshes)
 		{
@@ -1481,7 +1487,8 @@ public:
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.debug));
 
-		// Offscreen pipeline
+		// Offscreen pipelines
+
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/mrt.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
@@ -1491,6 +1498,8 @@ public:
 		// Separate layout
 		pipelineCreateInfo.layout = pipelineLayouts.offscreen;
 
+		// Solid
+
 		// Blend attachment states required for all color attachments
 		// This is important, as color write mask will otherwise be 0x0 and you
 		// won't see anything rendered to the attachment
@@ -1499,6 +1508,19 @@ public:
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE)
 		};
+
+		colorBlendState.attachmentCount = blendAttachmentStates.size();
+		colorBlendState.pAttachments = blendAttachmentStates.data();
+
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.solid));
+
+		// Alpha blending (no depth writes)
+
+		shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt_discard.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+		depthStencilState.depthWriteEnable = VK_FALSE;
+
+		//rasterizationState.rasterizerDiscardEnable = VK_TRUE;
 
 		for (uint32_t i = 0; i < blendAttachmentStates.size(); i++)
 		{
@@ -1511,10 +1533,8 @@ public:
 			blendAttachmentStates[i].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		}
 
-		colorBlendState.attachmentCount = blendAttachmentStates.size();
-		colorBlendState.pAttachments = blendAttachmentStates.data();
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.blend));
 
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.offscreen));
 	}
 
 	// Prepare and initialize uniform buffer containing shader uniforms
@@ -1573,7 +1593,7 @@ public:
 
 	void updateUniformBufferDeferredMatrices()
 	{
-		uboOffscreenVS.projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 256.0f);
+		uboOffscreenVS.projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 1.0f, 512.0f);
 
 		uboOffscreenVS.view = glm::translate(glm::mat4(), glm::vec3(0.0f, 0.0f, 0.0f));
 		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
