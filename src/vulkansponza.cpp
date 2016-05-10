@@ -1553,10 +1553,16 @@ public:
 		pipelineCreateInfo.pDynamicState = &dynamicState;
 		pipelineCreateInfo.stageCount = shaderStages.size();
 		pipelineCreateInfo.pStages = shaderStages.data();
+		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.deferred));
 
+		// Derivate info for other pipelines
+		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+		pipelineCreateInfo.basePipelineHandle = pipelines.deferred;
+
 		// Debug display pipeline
+
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.debug));
@@ -1593,8 +1599,7 @@ public:
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt_discard.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
 		depthStencilState.depthWriteEnable = VK_FALSE;
-
-		//rasterizationState.rasterizerDiscardEnable = VK_TRUE;
+		rasterizationState.cullMode = VK_CULL_MODE_NONE;
 
 		for (uint32_t i = 0; i < blendAttachmentStates.size(); i++)
 		{
