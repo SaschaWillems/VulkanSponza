@@ -118,6 +118,8 @@ private:
 
 			aiString name;
 			aScene->mMaterials[i]->Get(AI_MATKEY_NAME, name);
+			aiColor3D ambient;
+			aScene->mMaterials[i]->Get(AI_MATKEY_COLOR_AMBIENT, ambient);
 			materials[i].name = name.C_Str();
 			std::cout << "Material \"" << materials[i].name << "\"" << std::endl;
 
@@ -147,6 +149,10 @@ private:
 				aScene->mMaterials[i]->GetTexture(aiTextureType_HEIGHT, 0, &texturefile);
 				std::cout << "  Bump: \"" << texturefile.C_Str() << "\"" << std::endl;
 			}
+			else
+			{
+				std::cout << "  Material has no bump!" << std::endl;
+			}
 			// Mask
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_OPACITY) > 0)
 			{
@@ -154,13 +160,10 @@ private:
 				std::cout << "  Opacity: \"" << texturefile.C_Str() << "\"" << std::endl;
 				materials[i].hasAlpha = true;
 			}
-
-			// todo : load actual texture
-			// todo : mask texture
 		}
 	}
 
-	void loadMeshes()		
+	void loadMeshes(VkCommandBuffer copyCmd)		
 	{
 		meshes.resize(aScene->mNumMeshes);
 		for (uint32_t i = 0; i < meshes.size(); i++)
@@ -217,31 +220,102 @@ private:
 			VkResult err;
 			void *data;
 
+			struct
+			{
+				struct {
+					VkDeviceMemory memory;
+					VkBuffer buffer;
+				} vBuffer;
+				struct {
+					VkDeviceMemory memory;
+					VkBuffer buffer;
+				} iBuffer;
+			} staging;
+
 			// Generate vertex buffer
-			VkBufferCreateInfo vBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vertexDataSize);
+			VkBufferCreateInfo vBufferInfo;
+
+			// Staging buffer
+			vBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vertexDataSize);
+			VK_CHECK_RESULT(vkCreateBuffer(device, &vBufferInfo, nullptr, &staging.vBuffer.buffer));
+			vkGetBufferMemoryRequirements(device, staging.vBuffer.buffer, &memReqs);
+			memAlloc.allocationSize = memReqs.size;
+			memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+			VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.vBuffer.memory));
+			VK_CHECK_RESULT(vkMapMemory(device, staging.vBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+			memcpy(data, vertices.data(), vertexDataSize);
+			vkUnmapMemory(device, staging.vBuffer.memory);
+			VK_CHECK_RESULT(vkBindBufferMemory(device, staging.vBuffer.buffer, staging.vBuffer.memory, 0));
+
+			// Target
+			vBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, vertexDataSize);
 			VK_CHECK_RESULT(vkCreateBuffer(device, &vBufferInfo, nullptr, &meshes[i].vertexBuffer));
 			vkGetBufferMemoryRequirements(device, meshes[i].vertexBuffer, &memReqs);
 			memAlloc.allocationSize = memReqs.size;
-			memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+			memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 			VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &meshes[i].vertexMemory));
-			VK_CHECK_RESULT(vkMapMemory(device, meshes[i].vertexMemory, 0, VK_WHOLE_SIZE, 0, &data));
-			memcpy(data, vertices.data(), vertexDataSize);
-			vkUnmapMemory(device, meshes[i].vertexMemory);
 			VK_CHECK_RESULT(vkBindBufferMemory(device, meshes[i].vertexBuffer, meshes[i].vertexMemory, 0));
 
 			// Generate index buffer
-			VkBufferCreateInfo iBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, indexDataSize);
+			VkBufferCreateInfo iBufferInfo;
+
+			// Staging buffer
+			iBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, indexDataSize);
+			VK_CHECK_RESULT(vkCreateBuffer(device, &iBufferInfo, nullptr, &staging.iBuffer.buffer));
+			vkGetBufferMemoryRequirements(device, staging.iBuffer.buffer, &memReqs);
+			memAlloc.allocationSize = memReqs.size;
+			memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+			VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.iBuffer.memory));
+			VK_CHECK_RESULT(vkMapMemory(device, staging.iBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+			memcpy(data, indices.data(), indexDataSize);
+			vkUnmapMemory(device, staging.iBuffer.memory);
+			VK_CHECK_RESULT(vkBindBufferMemory(device, staging.iBuffer.buffer, staging.iBuffer.memory, 0));
+
+			// Target
+			iBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, indexDataSize);
 			VK_CHECK_RESULT(vkCreateBuffer(device, &iBufferInfo, nullptr, &meshes[i].indexBuffer));
 			vkGetBufferMemoryRequirements(device, meshes[i].indexBuffer, &memReqs);
 			memAlloc.allocationSize = memReqs.size;
-			memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+			memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 			VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &meshes[i].indexMemory));
-			VK_CHECK_RESULT(vkMapMemory(device, meshes[i].indexMemory, 0, VK_WHOLE_SIZE, 0, &data));
-			memcpy(data, indices.data(), indexDataSize);
-			vkUnmapMemory(device, meshes[i].indexMemory);
 			VK_CHECK_RESULT(vkBindBufferMemory(device, meshes[i].indexBuffer, meshes[i].indexMemory, 0));
 
-			// todo : staging
+			// Copy
+			VkCommandBufferBeginInfo cmdBufInfo = vkTools::initializers::commandBufferBeginInfo();
+			VK_CHECK_RESULT(vkBeginCommandBuffer(copyCmd, &cmdBufInfo));
+
+			VkBufferCopy copyRegion = {};
+
+			copyRegion.size = vertexDataSize;
+			vkCmdCopyBuffer(
+				copyCmd,
+				staging.vBuffer.buffer,
+				meshes[i].vertexBuffer,
+				1,
+				&copyRegion);
+
+			copyRegion.size = indexDataSize;
+			vkCmdCopyBuffer(
+				copyCmd,
+				staging.iBuffer.buffer,
+				meshes[i].indexBuffer,
+				1,
+				&copyRegion);
+
+			VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
+			
+			VkSubmitInfo submitInfo = {};
+			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+			submitInfo.commandBufferCount = 1;
+			submitInfo.pCommandBuffers = &copyCmd;
+
+			VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+			VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+
+			vkDestroyBuffer(device, staging.vBuffer.buffer, nullptr);
+			vkFreeMemory(device, staging.vBuffer.memory, nullptr);
+			vkDestroyBuffer(device, staging.iBuffer.buffer, nullptr);
+			vkFreeMemory(device, staging.iBuffer.memory, nullptr);
 		}
 
 		// Generate descriptor sets for all meshes
@@ -348,7 +422,7 @@ public:
 		this->defaultUBO = defaultUBO;
 	}
 
-	void load(std::string filename)
+	void load(std::string filename, VkCommandBuffer copyCmd)
 	{
 		Assimp::Importer Importer;
 
@@ -370,7 +444,7 @@ public:
 		if (aScene)
 		{
 			loadMaterials();
-			loadMeshes();
+			loadMeshes(copyCmd);
 		}
 		else
 		{
@@ -1653,6 +1727,17 @@ public:
 	}
 
 
+	void loadScene()
+	{
+		// todo : sep func
+		deviceMemProps = deviceMemoryProperties;
+
+		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+		scene = new Scene(device, queue, textureLoader, &uniformData.vsOffscreen);
+		scene->load(getAssetPath() + "sponza.obj", copyCmd);
+		vkFreeCommandBuffers(device, cmdPool, 1, &copyCmd);
+	}
+
 	void prepare()
 	{
 		VulkanExampleBase::prepare();
@@ -1667,12 +1752,7 @@ public:
 		preparePipelines();
 		setupDescriptorPool();
 		setupDescriptorSet();
-
-		// todo : sep func
-		deviceMemProps = deviceMemoryProperties;
-		scene = new Scene(device, queue, textureLoader, &uniformData.vsOffscreen);
-		scene->load(getAssetPath() + "sponza.obj");
-
+		loadScene();
 		buildCommandBuffers();
 		buildDeferredCommandBuffer();
 		prepared = true;
