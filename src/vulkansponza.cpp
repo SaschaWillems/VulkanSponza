@@ -23,6 +23,10 @@
 #include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
 
+#if defined(__ANDROID__)
+#include <android/asset_manager.h>
+#endif
+
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
 
@@ -51,6 +55,16 @@ struct Vertex
 	// todo : tangents
 };
 
+struct {
+	VkPipeline deferred;
+	VkPipeline debug;
+	struct {
+		VkPipeline solid; // todo : rename
+		VkPipeline bump;
+		VkPipeline blend;
+	} scene;
+} pipelines;
+
 struct SceneMaterial 
 {
 	std::string name;
@@ -58,6 +72,9 @@ struct SceneMaterial
 	vkTools::VulkanTexture specular;
 	vkTools::VulkanTexture bump;
 	bool hasAlpha = false;
+	bool hasBump = false;
+	bool hasSpecular = false;
+	VkPipeline *pipeline;
 };
 
 struct SceneMesh
@@ -112,6 +129,9 @@ private:
 	void loadMaterials()
 	{
 		materials.resize(aScene->mNumMaterials);
+		
+//		LOGD("Material count %d", materials.size());		
+
 		for (uint32_t i = 0; i < materials.size(); i++)
 		{
 			materials[i] = {};
@@ -130,12 +150,17 @@ private:
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_DIFFUSE) > 0)
 			{
 				std::cout << "  Diffuse: \"" << texturefile.C_Str() << "\"" << std::endl;
-				textureLoader->loadTexture("../data/" + std::string(texturefile.C_Str()), VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
+				std::string fileName = std::string(texturefile.C_Str());
+				std::replace(fileName.begin(), fileName.end(), '\\', '/');
+#if defined(__ANDROID__)
+				LOGD("Diffuse texture %s from %s", texturefile.C_Str(), assetPath.c_str());
+#endif
+				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
 			}
 			else
 			{
 				std::cout << "  Material has no diffuse, using dummy texture!" << std::endl;
-				textureLoader->loadTexture("../data/sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
+				textureLoader->loadTexture(assetPath + "sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
 			}
 			// Specular
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_SPECULAR) > 0)
@@ -148,10 +173,15 @@ private:
 			{
 				aScene->mMaterials[i]->GetTexture(aiTextureType_HEIGHT, 0, &texturefile);
 				std::cout << "  Bump: \"" << texturefile.C_Str() << "\"" << std::endl;
+				std::string fileName = std::string(texturefile.C_Str());
+				std::replace(fileName.begin(), fileName.end(), '\\', '/');
+				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].bump);
+				materials[i].hasBump = true;
 			}
 			else
 			{
-				std::cout << "  Material has no bump!" << std::endl;
+				std::cout << "  Material has no bump, using dummy texture!" << std::endl;
+				textureLoader->loadTexture(assetPath + "sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].bump);
 			}
 			// Mask
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_OPACITY) > 0)
@@ -160,7 +190,15 @@ private:
 				std::cout << "  Opacity: \"" << texturefile.C_Str() << "\"" << std::endl;
 				materials[i].hasAlpha = true;
 			}
+
+			materials[i].pipeline = &pipelines.scene.solid;
+
+			if (materials[i].hasBump)
+			{
+				materials[i].pipeline = &pipelines.scene.bump;
+			}
 		}
+
 	}
 
 	void loadMeshes(VkCommandBuffer copyCmd)		
@@ -324,7 +362,7 @@ private:
 		// Decriptor pool
 		std::vector<VkDescriptorPoolSize> poolSizes;
 		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, meshes.size()));
-		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshes.size()) /* * num_stages */);
+		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshes.size() * 2));
 
 		VkDescriptorPoolCreateInfo descriptorPoolInfo =
 			vkTools::initializers::descriptorPoolCreateInfo(
@@ -346,7 +384,11 @@ private:
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_SHADER_STAGE_FRAGMENT_BIT,
 			1));
-		// todo : Additional maps...
+		// Binding 2 : Bump
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			2));
 
 		VkDescriptorSetLayoutCreateInfo descriptorLayout =
 			vkTools::initializers::descriptorSetLayoutCreateInfo(
@@ -375,11 +417,15 @@ private:
 			// Background
 			vkTools::checkResult(vkAllocateDescriptorSets(device, &allocInfo, &meshes[i].descriptorSet));
 
-			VkDescriptorImageInfo texDescriptor =
-				vkTools::initializers::descriptorImageInfo(
-					meshes[i].material->diffuse.sampler,
-					meshes[i].material->diffuse.view,
-					VK_IMAGE_LAYOUT_GENERAL);
+			std::vector<VkDescriptorImageInfo> texDescriptors;
+			texDescriptors.push_back(vkTools::initializers::descriptorImageInfo(
+				meshes[i].material->diffuse.sampler,
+				meshes[i].material->diffuse.view,
+				VK_IMAGE_LAYOUT_GENERAL));
+			texDescriptors.push_back(vkTools::initializers::descriptorImageInfo(
+				meshes[i].material->bump.sampler,
+				meshes[i].material->bump.view,
+				VK_IMAGE_LAYOUT_GENERAL));
 
 			// todo : additional maps
 
@@ -392,20 +438,26 @@ private:
 					VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 					0,
 					&defaultUBO->descriptor));
-
-			// Binding 1 : Color map 
-			writeDescriptorSets.push_back(
-				vkTools::initializers::writeDescriptorSet(
+			// Image bindings
+			for (uint32_t j = 0; j < texDescriptors.size(); j++)
+			{
+				writeDescriptorSets.push_back(vkTools::initializers::writeDescriptorSet(
 					meshes[i].descriptorSet,
 					VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					1,
-					&texDescriptor));
+					1 + j,
+					&texDescriptors[j]));
+			}
 
 			vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 		}
 	}
 
 public:
+#if defined(__ANDROID__)
+	AAssetManager* assetManager = nullptr;
+#endif
+
+	std::string assetPath = "";
 
 	std::vector<SceneMaterial> materials;
 	std::vector<SceneMesh> meshes;
@@ -436,7 +488,7 @@ public:
 		void *meshData = malloc(size);
 		AAsset_read(asset, meshData, size);
 		AAsset_close(asset);
-		assimpScene = Importer.ReadFileFromMemory(meshData, size, flags);
+		aScene = Importer.ReadFileFromMemory(meshData, size, flags);
 		free(meshData);
 #else
 		aScene = Importer.ReadFile(filename.c_str(), flags);
@@ -521,15 +573,6 @@ public:
 	} uniformData;
 
 	struct {
-		VkPipeline deferred;
-		VkPipeline debug;
-		struct {
-			VkPipeline solid;
-			VkPipeline blend;
-		} scene;
-	} pipelines;
-
-	struct {
 		VkPipelineLayout deferred;
 		VkPipelineLayout offscreen;
 	} pipelineLayouts;
@@ -574,12 +617,13 @@ public:
 		cameraPos = { 0.0f, 10.0f, 0.0f };
 		width = 1920;
 		height = 1080;
-		title = "Vulkan Sponza - © 2016 by Sascha Willems";
-		timerSpeed = 0.5f;
+		title = "Vulkan Sponza - (c) 2016 by Sascha Willems";
+		timerSpeed = 0.15f;
 		rotationSpeed = 0.15f;
 #if defined(_WIN32)
 		setupConsole("VulkanExample");
 #endif
+		srand(time(NULL));
 	}
 
 	~VulkanExample()
@@ -616,6 +660,7 @@ public:
 
 		vkDestroyPipeline(device, pipelines.deferred, nullptr);
 		vkDestroyPipeline(device, pipelines.scene.solid, nullptr);
+		vkDestroyPipeline(device, pipelines.scene.bump, nullptr);
 		vkDestroyPipeline(device, pipelines.scene.blend, nullptr);
 		vkDestroyPipeline(device, pipelines.debug, nullptr);
 
@@ -1054,6 +1099,8 @@ public:
 			{
 				continue;
 			}
+			// todo : perf
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.material->pipeline);
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
 			vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &mesh.vertexBuffer, offsets);
 			vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1370,11 +1417,16 @@ public:
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			VK_SHADER_STAGE_VERTEX_BIT,
 			0));
-		// Binding 1 : Position texture target / Scene colormap
+		// Binding 1 : Diffuse
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_SHADER_STAGE_FRAGMENT_BIT,
 			1));
+		// Binding 1 : Bump
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			2));
 
 		descriptorLayout.pBindings = setLayoutBindings.data();
 		descriptorLayout.bindingCount = setLayoutBindings.size();
@@ -1559,6 +1611,7 @@ public:
 
 		// Derivate info for other pipelines
 		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+		pipelineCreateInfo.basePipelineIndex = -1;
 		pipelineCreateInfo.basePipelineHandle = pipelines.deferred;
 
 		// Debug display pipeline
@@ -1580,9 +1633,6 @@ public:
 
 		// Solid
 
-		// Blend attachment states required for all color attachments
-		// This is important, as color write mask will otherwise be 0x0 and you
-		// won't see anything rendered to the attachment
 		std::array<VkPipelineColorBlendAttachmentState, 3> blendAttachmentStates = {
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
@@ -1593,6 +1643,11 @@ public:
 		colorBlendState.pAttachments = blendAttachmentStates.data();
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.solid));
+
+		// Bump
+		shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt_bump.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.bump));
 
 		// Alpha blending (no depth writes)
 
@@ -1688,9 +1743,27 @@ public:
 		vkUnmapMemory(device, uniformData.vsOffscreen.memory);
 	}
 
+	float rnd(float range)
+	{
+		return range * (rand() / double(RAND_MAX));
+	}
+
 	// Update fragment shader light position uniform block
 	void updateUniformBufferDeferredLights()
 	{
+		/*
+		const float step = 20.0f;
+		for (int32_t i = 0; i < 64; i++)
+		{
+			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 20.0f, 10.0f, rnd(2.5f)-rnd(2.5f), 0.0f);
+//			uboFragmentLights.lights[i].position = glm::vec4((float)i * step - 32 * step, 5.0f, rnd(2.5f) - rnd(2.5f), 0.0f);
+			uboFragmentLights.lights[i].color = glm::vec4(rnd(1.0f), rnd(1.0f), rnd(1.0f), 1.0f);
+			uboFragmentLights.lights[i].radius = 25.0f;
+			uboFragmentLights.lights[i].linearFalloff = 0.02f;
+			uboFragmentLights.lights[i].quadraticFalloff = 0.15f;
+		}
+		*/
+
 		std::array<glm::vec4, 5> lightColors;
 		lightColors[0] = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 		lightColors[1] = glm::vec4(1.0f);
@@ -1707,26 +1780,31 @@ public:
 			uboFragmentLights.lights[i].quadraticFalloff = 0.003f;
 		}
 
+		uboFragmentLights.lights[0].color = glm::vec4(1.0f);
+		//uboFragmentLights.lights[0].position.x += 10.0f;
+		uboFragmentLights.lights[0].position.y = 10.0f;// +(10.0f * sin(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[0].position.z = (10.0f * cos(glm::radians(360.0f * timer)));
+
 		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 15.0f, -13.0f, 0.0f);
-		uboFragmentLights.lights[5].position.x += (1.5f * sin(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[5].position.z += (1.5f * cos(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[5].position.x += (2.5f * sin(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[5].position.z += (2.5f * cos(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[5].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
 		uboFragmentLights.lights[5].radius = 100.0f;
 		uboFragmentLights.lights[5].linearFalloff = 0.004f;
 		uboFragmentLights.lights[5].quadraticFalloff = 0.003f;
 
 		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 15.0f, 9.0f, 0.0f);
-		uboFragmentLights.lights[6].position.x += (1.5f * cos(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[6].position.z += (1.5f * sin(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[6].position.x += (2.5f * cos(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[6].position.z += (2.5f * sin(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[6].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
 		uboFragmentLights.lights[6].radius = 100.0f;
 		uboFragmentLights.lights[6].linearFalloff = 0.004f;
 		uboFragmentLights.lights[6].quadraticFalloff = 0.003f;
 
-		uboFragmentLights.viewPos = glm::vec4(0.0f, 0.0f, -zoom, 0.0f);
+		uboFragmentLights.viewPos = glm::vec4(-cameraPos, 0.0f);
 
 		uint8_t *pData;
-		VK_CHECK_RESULT(vkMapMemory(device, uniformData.fsLights.memory, 0, sizeof(uboFragmentLights), 0, (void **)&pData));
+		VK_CHECK_RESULT(vkMapMemory(device, uniformData.fsLights.memory, 0, VK_WHOLE_SIZE, 0, (void **)&pData));
 		memcpy(pData, &uboFragmentLights, sizeof(uboFragmentLights));
 		vkUnmapMemory(device, uniformData.fsLights.memory);
 	}
@@ -1739,7 +1817,13 @@ public:
 
 		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
 		scene = new Scene(device, queue, textureLoader, &uniformData.vsOffscreen);
-		scene->load(getAssetPath() + "sponza.obj", copyCmd);
+
+#if defined(__ANDROID__)
+		scene->assetManager = androidApp->activity->assetManager;
+#endif
+		scene->assetPath = getAssetPath();
+
+		scene->load(getAssetPath() + "sponza.dae", copyCmd);
 		vkFreeCommandBuffers(device, cmdPool, 1, &copyCmd);
 	}
 
@@ -1816,6 +1900,7 @@ public:
 			cameraPos += glm::normalize(glm::cross(camFront, glm::vec3(0.0f, 1.0f, 0.0f))) * camSpeed;
 	}
 
+#if defined(_WIN32)
 	void handleEvent(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
 		if (uMsg == WM_KEYDOWN)
@@ -1858,6 +1943,7 @@ public:
 			}
 		}
 	}
+#endif
 
 };
 

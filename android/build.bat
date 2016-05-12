@@ -13,7 +13,7 @@ if %ERRORLEVEL% EQU 0 (
 	xcopy "banner.png" "res\drawable-xhdpi" /Y
 
 	call ant debug -Dout.final.file=vulkansponza.apk
-    if "%2" == "-deploy" (    
+    if "%1" == "-deploy" (    
         adb install -r vulkansponza.apk
     )
 ) ELSE (
