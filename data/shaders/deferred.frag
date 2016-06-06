@@ -22,7 +22,7 @@ struct Light {
 
 layout (binding = 4) uniform UBO 
 {
-	Light lights[6];
+	Light lights[7];
 	vec4 viewPos;
 } ubo;
 
@@ -35,11 +35,12 @@ void main()
     vec4 albedo = texture(samplerAlbedo, inUV);
     
 	#define lightCount 7
-	#define ambient 0.00
-	#define specularStrength 0.15
+	#define specularStrength 1.0
+
+	vec3 ambient = albedo.rgb * 0.1;
 	
 	// Ambient part
-    vec3 fragcolor  = vec3(ambient);
+    vec3 fragcolor  = ambient;
 	
 //    vec3 fragcolor  = albedo.rgb * ambient;
     vec3 viewVec = normalize(ubo.viewPos.xyz - fragPos);
@@ -57,7 +58,7 @@ void main()
             vec3 diffuse = max(dot(normal, lightVec), 0.0) * albedo.rgb * ubo.lights[i].color.rgb;
             // Specular part (specular texture part stored in albedo alpha channel)
             vec3 halfVec = normalize(lightVec + viewVec);  
-            vec3 specular = ubo.lights[i].color.rgb * pow(max(dot(normal, halfVec), 0.0), 16.0) * albedo.a * specularStrength;
+            vec3 specular = ubo.lights[i].color.rgb * pow(max(dot(normal, halfVec), 0.0), 16.0) * 1.0 * specularStrength;
             // Attenuation with linearFalloff and quadraticFalloff falloff
             float attenuation = 1.0 / (1.0 + ubo.lights[i].linearFalloff * dist + ubo.lights[i].quadraticFalloff * dist * dist);
             fragcolor += (diffuse + specular) * attenuation;

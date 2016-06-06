@@ -24,7 +24,7 @@
     <ClCompile Include="..\base\vulkantools.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="textoverlay.cpp">
+    <ClCompile Include="vulkansponza.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -36,6 +36,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\base\vulkantools.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\base\vulkantextoverlay.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

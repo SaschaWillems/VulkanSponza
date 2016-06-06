@@ -19,6 +19,7 @@
   <ItemGroup>
     <ClInclude Include="..\base\vulkandebug.h" />
     <ClInclude Include="..\base\vulkanexamplebase.h" />
+    <ClInclude Include="..\base\vulkantextoverlay.hpp" />
     <ClInclude Include="..\base\vulkantools.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
