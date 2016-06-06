@@ -798,6 +798,11 @@ VulkanExampleBase::~VulkanExampleBase()
 	vkDestroySemaphore(device, semaphores.renderComplete, nullptr);
 	vkDestroySemaphore(device, semaphores.textOverlayComplete, nullptr);
 
+	if (enableTextOverlay)
+	{
+		delete textOverlay;
+	}
+
 	vkDestroyDevice(device, nullptr);
 
 	if (enableValidation)

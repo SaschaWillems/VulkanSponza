@@ -475,6 +475,25 @@ public:
 		this->defaultUBO = defaultUBO;
 	}
 
+	~Scene()
+	{
+		for (auto mesh : meshes)
+		{
+			vkDestroyBuffer(device, mesh.vertexBuffer, nullptr);
+			vkFreeMemory(device, mesh.vertexMemory, nullptr);
+			vkDestroyBuffer(device, mesh.indexBuffer, nullptr);
+			vkFreeMemory(device, mesh.indexMemory, nullptr);
+		}
+		for (auto material : materials)
+		{
+			textureLoader->destroyTexture(material.diffuse);
+			textureLoader->destroyTexture(material.bump);
+		}
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+	}
+
 	void load(std::string filename, VkCommandBuffer copyCmd)
 	{
 		Assimp::Importer Importer;
@@ -687,6 +706,8 @@ public:
 		textureLoader->destroyTexture(textures.colorMap);
 
 		vkDestroySemaphore(device, offscreenSemaphore, nullptr);
+
+		delete(scene);
 	}
 
 	// Create a frame buffer attachment
@@ -1869,6 +1890,35 @@ public:
 		}
 	}
 #endif
+
+	virtual void keyPressed(uint32_t keyCode)
+	{
+		switch (keyCode)
+		{
+		case 0x44:
+		case GAMEPAD_BUTTON_A:
+			toggleDebugDisplay();
+			updateTextOverlay();
+			break;
+		}
+	}
+
+	virtual void getOverlayText(VulkanTextOverlay *textOverlay)
+	{
+#if defined(__ANDROID__)
+		textOverlay->addText("Press \"Button A\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
+#else
+		textOverlay->addText("Press \"d\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
+#endif
+		// Render targets
+		if (debugDisplay)
+		{
+			textOverlay->addText("World Position", (float)width * 0.25f, (float)height * 0.5f - 25.0f, VulkanTextOverlay::alignCenter);
+			textOverlay->addText("World normals", (float)width * 0.75f, (float)height * 0.5f - 25.0f, VulkanTextOverlay::alignCenter);
+			textOverlay->addText("Color", (float)width * 0.25f, (float)height - 25.0f, VulkanTextOverlay::alignCenter);
+			textOverlay->addText("Final image", (float)width * 0.75f, (float)height - 25.0f, VulkanTextOverlay::alignCenter);
+		}
+	}
 };
 
 VulkanExample *vulkanExample;
