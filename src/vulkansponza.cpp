@@ -622,13 +622,13 @@ public:
 #endif
 		enableTextOverlay = true;
 		title = "Vulkan Sponza - (c) 2016 by Sascha Willems";
-		timerSpeed = 0.15f;
+		timerSpeed = 0.075f;
 		rotationSpeed = 0.15f;
 #if defined(_WIN32)
 		setupConsole("VulkanExample");
 #endif
 		srand(time(NULL));
-		paused = true;
+//		paused = true;
 	}
 
 	~VulkanExample()
@@ -1653,9 +1653,9 @@ public:
 		}
 
 		uboFragmentLights.lights[0].color = glm::vec4(1.0f);
-		//uboFragmentLights.lights[0].position.x += 10.0f;
-		uboFragmentLights.lights[0].position.y = 10.0f;// +(10.0f * sin(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[0].position.z = (10.0f * cos(glm::radians(360.0f * timer)));
+		uboFragmentLights.lights[0].position.x = -sin(glm::radians(360.0f * timer)) * 120.0f;
+		uboFragmentLights.lights[0].position.y = 2.5f;
+		uboFragmentLights.lights[0].position.z = cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f;
 
 		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 15.0f, -13.0f, 0.0f);
 		uboFragmentLights.lights[5].position.x += (2.5f * sin(glm::radians(360.0f * timer)));

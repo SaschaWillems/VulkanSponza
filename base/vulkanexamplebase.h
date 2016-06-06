@@ -41,6 +41,14 @@
 #include "vulkanMeshLoader.hpp"
 #include "vulkantextoverlay.hpp"
 
+#define GAMEPAD_BUTTON_A 0x1000
+#define GAMEPAD_BUTTON_B 0x1001
+#define GAMEPAD_BUTTON_X 0x1002
+#define GAMEPAD_BUTTON_Y 0x1003
+#define GAMEPAD_BUTTON_L1 0x1004
+#define GAMEPAD_BUTTON_R1 0x1005
+#define GAMEPAD_BUTTON_START 0x1006
+
 class VulkanExampleBase
 {
 private:	

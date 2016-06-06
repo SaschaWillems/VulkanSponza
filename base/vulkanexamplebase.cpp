@@ -63,7 +63,7 @@ VkResult VulkanExampleBase::createDevice(VkDeviceQueueCreateInfo requestedQueues
 
 	if (enabledExtensions.size() > 0)
 	{
-		enabledExtensions.push_back("VK_AMD_rasterization_order");
+//		enabledExtensions.push_back("VK_AMD_rasterization_order");
 		deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledExtensions.size();
 		deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions.data();
 	}
@@ -487,20 +487,20 @@ void VulkanExampleBase::renderLoop()
 			// todo : time based and relative axis positions
 			bool updateView = false;
 			// Rotate
-			if (std::abs(gamePadState.axes.x) > deadZone)
+			if (std::abs(gamePadState.axisLeft.x) > deadZone)
 			{
-				rotation.y += gamePadState.axes.x * 0.5f * rotationSpeed;
+				rotation.y += gamePadState.axisLeft.x * 0.5f * rotationSpeed;
 				updateView = true;
 			}
-			if (std::abs(gamePadState.axes.y) > deadZone)
+			if (std::abs(gamePadState.axisLeft.y) > deadZone)
 			{
-				rotation.x -= gamePadState.axes.y * 0.5f * rotationSpeed;
+				rotation.x -= gamePadState.axisLeft.y * 0.5f * rotationSpeed;
 				updateView = true;
 			}
 			// Zoom
-			if (std::abs(gamePadState.axes.rz) > deadZone)
+			if (std::abs(gamePadState.axisRight.x) > deadZone)
 			{
-				zoom -= gamePadState.axes.rz * 0.01f * zoomSpeed;
+				zoom -= gamePadState.axisRight.x * 0.01f * zoomSpeed;
 				updateView = true;
 			}
 			if (updateView)

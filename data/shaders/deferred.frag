@@ -61,7 +61,7 @@ void main()
             vec3 specular = ubo.lights[i].color.rgb * pow(max(dot(normal, halfVec), 0.0), 16.0) * 1.0 * specularStrength;
             // Attenuation with linearFalloff and quadraticFalloff falloff
             float attenuation = 1.0 / (1.0 + ubo.lights[i].linearFalloff * dist + ubo.lights[i].quadraticFalloff * dist * dist);
-            fragcolor += (diffuse + specular) * attenuation;
+            fragcolor += (diffuse/* + specular*/) * attenuation;
         }
 		
     }    	
