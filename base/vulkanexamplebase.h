@@ -40,6 +40,7 @@
 #include "vulkanTextureLoader.hpp"
 #include "vulkanMeshLoader.hpp"
 #include "vulkantextoverlay.hpp"
+#include "camera.hpp"
 
 #define GAMEPAD_BUTTON_A 0x1000
 #define GAMEPAD_BUTTON_B 0x1001
@@ -49,11 +50,30 @@
 #define GAMEPAD_BUTTON_R1 0x1005
 #define GAMEPAD_BUTTON_START 0x1006
 
+// Function pointer for getting physical device fetures to be enabled
+typedef VkPhysicalDeviceFeatures (*PFN_GetEnabledFeatures)();
+
+//std::vector<std::string> arguments;
+//void getArguments()
+//{
+//#if defined(__WIN32)
+//
+//#elif defined(__linux__)
+//#endif
+//}
+
 class VulkanExampleBase
 {
 private:	
 	// Set to true when example is created with enabled validation layers
 	bool enableValidation = false;
+	// Set to true when the debug marker extension is detected
+	bool enableDebugMarkers = false;
+	// Set tot true if v-sync will be forced for the swapchain
+	bool enableVSync = false;
+	// Device features enabled by the example
+	// If not set, no additional features are enabled (may result in validation layer errors)
+	VkPhysicalDeviceFeatures enabledFeatures = {};
 	// fps timer (one second interval)
 	float fpsTimer = 0.0f;
 	// Create application wide Vulkan instance
@@ -72,7 +92,7 @@ protected:
 	float frameTimer = 1.0f;
 	// Frame counter to display fps
 	uint32_t frameCounter = 0;
-	uint32_t lastFPS = 0.0f;
+	uint32_t lastFPS = 0;
 	// Vulkan instance, stores all per-application states
 	VkInstance instance;
 	// Physical device (GPU) that Vulkan will ise
@@ -97,9 +117,9 @@ protected:
 	// Command buffer used for setup
 	VkCommandBuffer setupCmdBuffer = VK_NULL_HANDLE;
 	// Command buffer for submitting a post present image barrier
-	VkCommandBuffer postPresentCmdBuffer = VK_NULL_HANDLE;
-	// Command buffer for submitting a pre present image barrier
-	VkCommandBuffer prePresentCmdBuffer = VK_NULL_HANDLE;
+	std::vector<VkCommandBuffer> postPresentCmdBuffers = { VK_NULL_HANDLE };
+	// Command buffers for submitting a pre present image barrier
+	std::vector<VkCommandBuffer> prePresentCmdBuffers = { VK_NULL_HANDLE };
 	// Pipeline stage flags for the submit info structure
 	VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	// Contains command buffers and semaphores to be presented to the queue
@@ -158,6 +178,8 @@ public:
 	// Use to adjust mouse zoom speed
 	float zoomSpeed = 1.0f;
 
+	Camera camera;
+
 	glm::vec3 rotation = glm::vec3();
 	glm::vec3 cameraPos = glm::vec3();
 	glm::vec2 mousePos;
@@ -172,7 +194,7 @@ public:
 		VkImageView view;
 	} depthStencil;
 
-	// Gamepad state (only one)
+	// Gamepad state (only one pad supported)
 	struct
 	{
 		glm::vec2 axisLeft = glm::vec2(0.0f);
@@ -200,8 +222,10 @@ public:
 	xcb_intern_atom_reply_t *atom_wm_delete_window;
 #endif
 
-	VulkanExampleBase(bool enableValidation);
-	VulkanExampleBase() : VulkanExampleBase(false) {};
+	// Default ctor
+	VulkanExampleBase(bool enableValidation, PFN_GetEnabledFeatures enabledFeaturesFn = nullptr);
+
+	// dtor
 	~VulkanExampleBase();
 
 	// Setup the vulkan instance, enable required extensions and connect to the physical device (GPU)
@@ -214,15 +238,11 @@ public:
 #elif defined(__ANDROID__)
 	static int32_t handleAppInput(struct android_app* app, AInputEvent* event);
 	static void handleAppCommand(android_app* app, int32_t cmd);
-	// Called if a (gamepad) button is pressed
-	// Can be overriden in dervide class
-	virtual void  buttonPressed(int32_t button);
 #elif defined(__linux__)
 	xcb_window_t setupWindow();
 	void initxcbConnection();
 	void handleEvent(const xcb_generic_event_t *event);
 #endif
-
 	// Pure virtual render function (override in derived class)
 	virtual void render() = 0;
 	// Called when view change occurs
@@ -240,13 +260,17 @@ public:
 	// all command buffers that may reference this
 	virtual void buildCommandBuffers();
 
+	// Builds the command buffers used to submit the present barriers
+	void buildPresentCommandBuffers();
+
 	// Get memory type for a given memory allocation (flags and bits)
 	VkBool32 getMemoryType(uint32_t typeBits, VkFlags properties, uint32_t *typeIndex);
+	uint32_t getMemoryType(uint32_t typeBits, VkFlags properties);
 
 	// Creates a new (graphics) command pool object storing command buffers
 	void createCommandPool();
 	// Setup default depth and stencil views
-	void setupDepthStencil();
+	virtual void setupDepthStencil();
 	// Create framebuffers for all requested swap chain images
 	// Can be overriden in derived class to setup a custom framebuffer (e.g. for MSAA)
 	virtual void setupFrameBuffer();
@@ -310,6 +334,15 @@ public:
 		VkBuffer *buffer,
 		VkDeviceMemory *memory,
 		VkDescriptorBufferInfo *descriptor);
+	// Overload to pass memory property flags
+	VkBool32 createBuffer(
+		VkBufferUsageFlags usage,
+		VkMemoryPropertyFlags memoryPropertyFlags,
+		VkDeviceSize size,
+		void *data,
+		VkBuffer *buffer,
+		VkDeviceMemory *memory,
+		VkDescriptorBufferInfo *descriptor);
 
 	// Load a mesh (using ASSIMP) and create vulkan vertex and index buffers with given vertex layout
 	void loadMesh(
@@ -320,14 +353,6 @@ public:
 
 	// Start the main render loop
 	void renderLoop();
-
-	// Submit a pre present image barrier to the queue
-	// Transforms the (framebuffer) image layout from color attachment to present(khr) for presenting to the swap chain
-	void submitPrePresentBarrier(VkImage image);
-
-	// Submit a post present image barrier to the queue
-	// Transforms the (framebuffer) image layout back from present(khr) to color attachment layout
-	void submitPostPresentBarrier(VkImage image);
 
 	// Prepare a submit info structure containing
 	// semaphores and submit buffer info for vkQueueSubmit
@@ -349,6 +374,69 @@ public:
 
 	// Submit the frames' workload 
 	// - Submits the text overlay (if enabled)
+	// - 
 	void submitFrame();
+
 };
 
+// OS specific macros for the example main entry points
+#if defined(_WIN32)
+// Windows entry point
+#define VULKAN_EXAMPLE_MAIN()																		\
+VulkanExample *vulkanExample;																		\
+LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)						\
+{																									\
+	if (vulkanExample != NULL)																		\
+	{																								\
+		vulkanExample->handleMessages(hWnd, uMsg, wParam, lParam);									\
+	}																								\
+	return (DefWindowProc(hWnd, uMsg, wParam, lParam));												\
+}																									\
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)	\
+{																									\
+	vulkanExample = new VulkanExample();															\
+	vulkanExample->setupWindow(hInstance, WndProc);													\
+	vulkanExample->initSwapchain();																	\
+	vulkanExample->prepare();																		\
+	vulkanExample->renderLoop();																	\
+	delete(vulkanExample);																			\
+	return 0;																						\
+}																									
+#elif defined(__ANDROID__)
+// Android entry point
+// A note on app_dummy(): This is required as the compiler may otherwise remove the main entry point of the application
+#define VULKAN_EXAMPLE_MAIN()																		\
+VulkanExample *vulkanExample;																		\
+void android_main(android_app* state)																\
+{																									\
+	app_dummy();																					\
+	vulkanExample = new VulkanExample();															\
+	state->userData = vulkanExample;																\
+	state->onAppCmd = VulkanExample::handleAppCommand;												\
+	state->onInputEvent = VulkanExample::handleAppInput;											\
+	vulkanExample->androidApp = state;																\
+	vulkanExample->renderLoop();																	\
+	delete(vulkanExample);																			\
+}
+#elif defined(__linux__)
+// Linux entry point
+// todo: extract command line arguments
+#define VULKAN_EXAMPLE_MAIN()																		\
+VulkanExample *vulkanExample;																		\
+static void handleEvent(const xcb_generic_event_t *event)											\
+{																									\
+	if (vulkanExample != NULL)																		\
+	{																								\
+		vulkanExample->handleEvent(event);															\
+	}																								\
+int main(const int argc, const char *argv[])													    \
+{																									\
+	vulkanExample = new VulkanExample();															\
+	vulkanExample->setupWindow();					 												\
+	vulkanExample->initSwapchain();																	\
+	vulkanExample->prepare();																		\
+	vulkanExample->renderLoop();																	\
+	delete(vulkanExample);																			\
+	return 0;																						\
+}
+#endif

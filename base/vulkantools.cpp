@@ -79,17 +79,6 @@ namespace vkTools
 		}
 	}
 
-	VkResult checkResult(VkResult result)
-	{
-		if (result != VK_SUCCESS)
-		{
-			std::string errorMsg = "Fatal : VkResult returned " + errorString(result) + "!";
-			std::cout << errorMsg << std::endl;
-			assert(result == VK_SUCCESS);
-		}
-		return result;
-	}
-
 	VkBool32 getSupportedDepthFormat(VkPhysicalDevice physicalDevice, VkFormat *depthFormat)
 	{
 		// Since all depth formats may be optional, we need to find a suitable depth format to use
@@ -137,81 +126,94 @@ namespace vkTools
 		imageMemoryBarrier.subresourceRange = subresourceRange;
 
 		// Source layouts (old)
-
-		// Undefined layout
-		// Only allowed as initial layout!
-		// Make sure any writes to the image have been finished
-		if (oldImageLayout == VK_IMAGE_LAYOUT_PREINITIALIZED)
+		// Source access mask controls actions that have to be finished on the old layout
+		// before it will be transitioned to the new layout
+		switch (oldImageLayout)
 		{
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-		}
+		case VK_IMAGE_LAYOUT_UNDEFINED:
+				// Image layout is undefined (or does not matter)
+				// Only valid as initial layout
+				// No flags required, listed only for completeness
+				imageMemoryBarrier.srcAccessMask = 0;
+				break;
 
-		// Old layout is color attachment
-		// Make sure any writes to the color buffer have been finished
-		if (oldImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) 
-		{
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		}
+		case VK_IMAGE_LAYOUT_PREINITIALIZED:
+				// Image is preinitialized
+				// Only valid as initial layout for linear images, preserves memory contents
+				// Make sure host writes have been finished
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+				break;
 
-		// Old layout is depth/stencil attachment
-		// Make sure any writes to the depth/stencil buffer have been finished
-		if (oldImageLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-		{
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		}
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+				// Image is a color attachment
+				// Make sure any writes to the color buffer have been finished
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				break;
 
-		// Old layout is transfer source
-		// Make sure any reads from the image have been finished
-		if (oldImageLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
-		{
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		}
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+				// Image is a depth/stencil attachment
+				// Make sure any writes to the depth/stencil buffer have been finished
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+				break;
 
-		// Old layout is shader read (sampler, input attachment)
-		// Make sure any shader reads from the image have been finished
-		if (oldImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		{
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+				// Image is a transfer source 
+				// Make sure any reads from the image have been finished
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+				break;
+
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+				// Image is a transfer destination
+				// Make sure any writes to the image have been finished
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+				break;
+
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+				// Image is read by a shader
+				// Make sure any shader reads from the image have been finished
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				break;
 		}
 
 		// Target layouts (new)
-
-		// New layout is transfer destination (copy, blit)
-		// Make sure any copyies to the image have been finished
-		if (newImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+		// Destination access mask controls the dependency for the new image layout
+		switch (newImageLayout)
 		{
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			// Image will be used as a transfer destination
+			// Make sure any writes to the image have been finished
 			imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		}
+			break;
 
-		// New layout is transfer source (copy, blit)
-		// Make sure any reads from and writes to the image have been finished
-		if (newImageLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
-		{
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			// Image will be used as a transfer source
+			// Make sure any reads from and writes to the image have been finished
 			imageMemoryBarrier.srcAccessMask = imageMemoryBarrier.srcAccessMask | VK_ACCESS_TRANSFER_READ_BIT;
 			imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		}
+			break;
 
-		// New layout is color attachment
-		// Make sure any writes to the color buffer hav been finished
-		if (newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-		{
-			imageMemoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			// Image will be used as a color attachment
+			// Make sure any writes to the color buffer have been finished
 			imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		}
+			imageMemoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
 
-		// New layout is depth attachment
-		// Make sure any writes to depth/stencil buffer have been finished
-		if (newImageLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) 
-		{
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+			// Image layout will be used as a depth/stencil attachment
+			// Make sure any writes to depth/stencil buffer have been finished
 			imageMemoryBarrier.dstAccessMask = imageMemoryBarrier.dstAccessMask | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		}
+			break;
 
-		// New layout is shader read (sampler, input attachment)
-		// Make sure any writes to the image have been finished
-		if (newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		{
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			// Image will be read in a shader (sampler, input attachment)
+			// Make sure any writes to the image have been finished
+			if (imageMemoryBarrier.srcAccessMask == 0)
+			{
+				imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			}
 			imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			break;
 		}
 
 		// Put barrier on top
@@ -273,30 +275,6 @@ namespace vkTools
 		return fileContent;
 	}
 
-	// Load a binary file into a buffer (e.g. SPIR-V)
-	char *readBinaryFile(const char *filename, size_t *psize)
-	{
-		long int size;
-		size_t retval;
-		void *shader_code;
-
-		FILE *fp = fopen(filename, "rb");
-		if (!fp) return NULL;
-
-		fseek(fp, 0L, SEEK_END);
-		size = ftell(fp);
-
-		fseek(fp, 0L, SEEK_SET);
-
-		shader_code = malloc(size);
-		retval = fread(shader_code, size, 1, fp);
-		assert(retval == 1);
-
-		*psize = size;
-
-		return (char*)shader_code;
-	}
-
 #if defined(__ANDROID__)
 	// Android shaders are stored as assets in the apk
 	// So they need to be loaded via the asset manager
@@ -314,38 +292,50 @@ namespace vkTools
 
 		VkShaderModule shaderModule;
 		VkShaderModuleCreateInfo moduleCreateInfo;
-		VkResult err;
-
 		moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		moduleCreateInfo.pNext = NULL;
-
 		moduleCreateInfo.codeSize = size;
 		moduleCreateInfo.pCode = (uint32_t*)shaderCode;
 		moduleCreateInfo.flags = 0;
-		err = vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule);
-		assert(!err);
+
+		VK_CHECK_RESULT(vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule));
+
+		delete[] shaderCode;
 
 		return shaderModule;
 	}
 #else
 	VkShaderModule loadShader(const char *fileName, VkDevice device, VkShaderStageFlagBits stage) 
 	{
-		size_t size = 0;
-		const char *shaderCode = readBinaryFile(fileName, &size);
+		size_t size;
+
+		FILE *fp = fopen(fileName, "rb");
+		assert(fp);
+
+		fseek(fp, 0L, SEEK_END);
+		size = ftell(fp);
+
+		fseek(fp, 0L, SEEK_SET);
+
+		//shaderCode = malloc(size);
+		char *shaderCode = new char[size];
+		size_t retval = fread(shaderCode, size, 1, fp);
+		assert(retval == 1);
 		assert(size > 0);
+
+		fclose(fp);
 
 		VkShaderModule shaderModule;
 		VkShaderModuleCreateInfo moduleCreateInfo;
-		VkResult err;
-
 		moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		moduleCreateInfo.pNext = NULL;
-
 		moduleCreateInfo.codeSize = size;
 		moduleCreateInfo.pCode = (uint32_t*)shaderCode;
 		moduleCreateInfo.flags = 0;
-		err = vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule);
-		assert(!err);
+
+		VK_CHECK_RESULT(vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule));
+
+		delete[] shaderCode;
 
 		return shaderModule;
 	}
@@ -360,11 +350,8 @@ namespace vkTools
 
 		VkShaderModule shaderModule;
 		VkShaderModuleCreateInfo moduleCreateInfo;
-		VkResult err;
-
 		moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		moduleCreateInfo.pNext = NULL;
-
 		moduleCreateInfo.codeSize = 3 * sizeof(uint32_t) + size + 1;
 		moduleCreateInfo.pCode = (uint32_t*)malloc(moduleCreateInfo.codeSize);
 		moduleCreateInfo.flags = 0;
@@ -375,8 +362,7 @@ namespace vkTools
 		((uint32_t *)moduleCreateInfo.pCode)[2] = stage;
 		memcpy(((uint32_t *)moduleCreateInfo.pCode + 3), shaderCode, size + 1);
 
-		err = vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule);
-		assert(!err);
+		VK_CHECK_RESULT(vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule));
 
 		return shaderModule;
 	}
@@ -552,6 +538,13 @@ VkFenceCreateInfo vkTools::initializers::fenceCreateInfo(VkFenceCreateFlags flag
 	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	fenceCreateInfo.flags = flags;
 	return fenceCreateInfo;
+}
+
+VkEventCreateInfo vkTools::initializers::eventCreateInfo()
+{
+	VkEventCreateInfo eventCreateInfo = {};
+	eventCreateInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+	return eventCreateInfo;
 }
 
 VkSubmitInfo vkTools::initializers::submitInfo()

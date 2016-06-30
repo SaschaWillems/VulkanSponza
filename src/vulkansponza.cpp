@@ -22,7 +22,6 @@
 
 #include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
-#include "vulkantextoverlay.hpp"
 
 #if defined(__ANDROID__)
 #include <android/asset_manager.h>
@@ -98,7 +97,7 @@ VkPhysicalDeviceMemoryProperties deviceMemProps;
 
 uint32_t getMemTypeIndex( uint32_t typeBits, VkFlags properties)
 {
-	for (int i = 0; i < 32; i++)
+	for (uint32_t i = 0; i < 32; i++)
 	{
 		if ((typeBits & 1) == 1)
 		{
@@ -109,6 +108,8 @@ uint32_t getMemTypeIndex( uint32_t typeBits, VkFlags properties)
 		}
 		typeBits >>= 1;
 	}
+
+	// todo: throw if no appropriate mem type was found
 	return 0;
 }
 
@@ -416,7 +417,7 @@ private:
 					1);
 
 			// Background
-			vkTools::checkResult(vkAllocateDescriptorSets(device, &allocInfo, &meshes[i].descriptorSet));
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &meshes[i].descriptorSet));
 
 			std::vector<VkDescriptorImageInfo> texDescriptors;
 			texDescriptors.push_back(vkTools::initializers::descriptorImageInfo(
@@ -535,23 +536,6 @@ public:
 
 	bool debugDisplay = false;
 
-	struct
-	{
-		struct 
-		{
-			bool left = false;
-			bool right = false;
-			bool up = false;
-			bool down = false;
-		} keys;
-
-		bool moving()
-		{
-			return keys.left || keys.right || keys.up || keys.down;
-		}
-
-	} camera;
-
 	struct {
 		vkTools::VulkanTexture colorMap;
 	} textures;
@@ -633,14 +617,20 @@ public:
 
 	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
 	{
-		rotation = { 0.0f, -90.0f, 0.0f };
-		cameraPos = { 0.0f, 10.0f, 0.0f };
 #if !defined(__ANDROID__)
 		width = 1920;
 		height = 1080;
 #endif
 		enableTextOverlay = true;
 		title = "Vulkan Sponza - (c) 2016 by Sascha Willems";
+
+		camera.type = Camera::CameraType::firstperson;
+		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 512.0f);
+		camera.setRotation(glm::vec3(0.0f, -90.0f, 0.0f));
+		camera.setTranslation(glm::vec3(0.0f, 10.0f, 0.0f));
+
+		camera.movementSpeed = 20.0f;
+
 		timerSpeed = 0.075f;
 		rotationSpeed = 0.15f;
 #if defined(_WIN32)
@@ -1020,7 +1010,6 @@ public:
 				vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 			}
 		}
-
 
 		vkCmdEndRenderPass(offScreenCmdBuffer);
 
@@ -1620,15 +1609,9 @@ public:
 
 	void updateUniformBufferDeferredMatrices()
 	{
-		uboOffscreenVS.projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 1.0f, 512.0f);
-
-		uboOffscreenVS.view = glm::translate(glm::mat4(), glm::vec3(0.0f, 0.0f, 0.0f));
-		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-		uboOffscreenVS.view = glm::rotate(uboOffscreenVS.view, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
+		uboOffscreenVS.projection = camera.matrices.perspective;
+		uboOffscreenVS.view = camera.matrices.view;
 		uboOffscreenVS.model = glm::mat4();
-		uboOffscreenVS.model = glm::translate(glm::mat4(), cameraPos);
 
 		uint8_t *pData;
 		VK_CHECK_RESULT(vkMapMemory(device, uniformData.vsOffscreen.memory, 0, sizeof(uboOffscreenVS), 0, (void **)&pData));
@@ -1705,9 +1688,6 @@ public:
 
 	void loadScene()
 	{
-		// todo : sep func
-		deviceMemProps = deviceMemoryProperties;
-
 		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
 		scene = new Scene(device, queue, textureLoader, &uniformData.vsOffscreen);
 
@@ -1737,12 +1717,10 @@ public:
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
 
 		// Scene rendering
-
 		// Wait for offscreen semaphore
 		submitInfo.pWaitSemaphores = &offscreenSemaphore;
 		// Signal ready with render complete semaphpre
 		submitInfo.pSignalSemaphores = &semaphores.renderComplete;
-
 		// Submit work
 		submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
@@ -1753,6 +1731,9 @@ public:
 	void prepare()
 	{
 		VulkanExampleBase::prepare();
+
+		// todo : sep func
+		deviceMemProps = deviceMemoryProperties;
 
 		loadTextures();
 		generateQuads();
@@ -1774,41 +1755,11 @@ public:
 		if (!prepared)
 			return;
 		draw();
+
 		if (!paused)
 		{
 			vkDeviceWaitIdle(device);
 			updateUniformBufferDeferredLights();
-		}
-
-		bool updateView = false;
-#if defined(__ANDROID__)
-		const float deadZone = 0.0015f;
-		camera.keys.up = (gamePadState.axisLeft.x) < -deadZone;
-		camera.keys.down = (gamePadState.axisLeft.x) > deadZone;
-		//camera.keys.left = (gamePadState.axisLeft.y - deadZone) > 0.0f;
-		//camera.keys.right = (gamePadState.axisLeft.y - deadZone) < 0.0f;
-
-		LOGD("%f / %f", gamePadState.axisLeft.x, gamePadState.axisLeft.y);
-
-		// Rotate
-		if (std::abs(gamePadState.axisRight.x - deadZone) > 0.0f)
-		{
-			rotation.y += gamePadState.axisRight.x * 2.5f;
-			updateView = true;
-		}
-		if (std::abs(gamePadState.axisRight.y - deadZone) > 0.0f)
-		{
-			rotation.x -= gamePadState.axisRight.y * 2.5f;
-			updateView = true;
-		}
-#endif
-
-		if (camera.moving() || updateView)
-		{
-			// todo : bad
-			vkDeviceWaitIdle(device);
-			move();
-			updateUniformBufferDeferredMatrices();
 		}
 	}
 
@@ -1826,76 +1777,11 @@ public:
 		updateUniformBuffersScreen();
 	}
 
-	void move()
-	{
-		glm::vec3 camFront;
-		camFront.x = -cos(glm::radians(rotation.x)) * sin(glm::radians(rotation.y));
-		camFront.y = sin(glm::radians(rotation.x));
-		camFront.z = cos(glm::radians(rotation.x)) * cos(glm::radians(rotation.y));
-		camFront = glm::normalize(camFront);
-
-		float camSpeed = frameTimer * 25.0f;
-
-		if (camera.keys.up)
-			cameraPos += camFront * camSpeed;
-		if (camera.keys.down)
-			cameraPos -= camFront * camSpeed;
-		if (camera.keys.left)
-			cameraPos -= glm::normalize(glm::cross(camFront, glm::vec3(0.0f, 1.0f, 0.0f))) * camSpeed;
-		if (camera.keys.right)
-			cameraPos += glm::normalize(glm::cross(camFront, glm::vec3(0.0f, 1.0f, 0.0f))) * camSpeed;
-	}
-
-#if defined(_WIN32)
-	void handleEvent(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-	{
-		if (uMsg == WM_KEYDOWN)
-		{
-			switch (wParam)
-			{
-			case 0x57:
-				camera.keys.up = true;
-				break;
-			case 0x53:
-				camera.keys.down = true;
-				break;
-			case 0x41:
-				camera.keys.left = true;
-				break;
-			case 0x44:
-				camera.keys.right = true;
-				break;
-			case 0x54:
-				toggleDebugDisplay();
-				break;
-			}
-		}
-		if (uMsg == WM_KEYUP)
-		{
-			switch (wParam)
-			{
-			case 0x57:
-				camera.keys.up = false;
-				break;
-			case 0x53:
-				camera.keys.down = false;
-				break;
-			case 0x41:
-				camera.keys.left = false;
-				break;
-			case 0x44:
-				camera.keys.right = false;
-				break;
-			}
-		}
-	}
-#endif
-
 	virtual void keyPressed(uint32_t keyCode)
 	{
 		switch (keyCode)
 		{
-		case 0x44:
+		case 0x31:
 		case GAMEPAD_BUTTON_A:
 			toggleDebugDisplay();
 			updateTextOverlay();
@@ -1908,7 +1794,7 @@ public:
 #if defined(__ANDROID__)
 		textOverlay->addText("Press \"Button A\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
 #else
-		textOverlay->addText("Press \"d\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
+		textOverlay->addText("Press \"1\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
 #endif
 		// Render targets
 		if (debugDisplay)
@@ -1921,64 +1807,4 @@ public:
 	}
 };
 
-VulkanExample *vulkanExample;
-
-#if defined(_WIN32)
-LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-	if (vulkanExample != NULL)
-	{
-		vulkanExample->handleMessages(hWnd, uMsg, wParam, lParam);
-		vulkanExample->handleEvent(hWnd, uMsg, wParam, lParam);
-	}
-	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
-}
-#elif defined(__linux__) && !defined(__ANDROID__)
-static void handleEvent(const xcb_generic_event_t *event)
-{
-	if (vulkanExample != NULL)
-	{
-		vulkanExample->handleEvent(event);
-	}
-}
-#endif
-
-// Main entry point
-#if defined(_WIN32)
-// Windows entry point
-int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
-#elif defined(__ANDROID__)
-// Android entry point
-void android_main(android_app* state)
-#elif defined(__linux__)
-// Linux entry point
-int main(const int argc, const char *argv[])
-#endif
-{
-#if defined(__ANDROID__)
-	// Removing this may cause the compiler to omit the main entry point 
-	// which would make the application crash at start
-	app_dummy();
-#endif
-	vulkanExample = new VulkanExample();
-#if defined(_WIN32)
-	vulkanExample->setupWindow(hInstance, WndProc);
-#elif defined(__ANDROID__)
-	// Attach vulkan example to global android application state
-	state->userData = vulkanExample;
-	state->onAppCmd = VulkanExample::handleAppCommand;
-	state->onInputEvent = VulkanExample::handleAppInput;
-	vulkanExample->androidApp = state;
-#elif defined(__linux__)
-	vulkanExample->setupWindow();
-#endif
-#if !defined(__ANDROID__)
-	vulkanExample->initSwapchain();
-	vulkanExample->prepare();
-#endif
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-#if !defined(__ANDROID__)
-	return 0;
-#endif
-}
+VULKAN_EXAMPLE_MAIN()
