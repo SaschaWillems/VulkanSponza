@@ -12,59 +12,52 @@ layout (location = 0) in vec2 inUV;
 layout (location = 0) out vec4 outFragcolor;
 
 struct Light {
-    vec4 position;
-    vec4 color;
+	vec4 position;
+	vec4 color;
 	float radius;
 	float quadraticFalloff;
 	float linearFalloff;
 	float _pad;
 };
 
+#define NUM_LIGHTS 13
+
 layout (binding = 4) uniform UBO 
 {
-	Light lights[7];
+	Light lights[NUM_LIGHTS];
 	vec4 viewPos;
 } ubo;
 
 
 void main() 
 {
-    // Get G-Buffer values
-    vec3 fragPos = texture(samplerposition, inUV).rgb;
-    vec3 normal = texture(samplerNormal, inUV).rgb;
-    vec4 albedo = texture(samplerAlbedo, inUV);
-    
-	#define lightCount 7
+	// Get G-Buffer values
+	vec3 fragPos = texture(samplerposition, inUV).rgb;
+	vec3 normal = texture(samplerNormal, inUV).rgb;
+	vec4 albedo = texture(samplerAlbedo, inUV);
+	
 	#define specularStrength 1.0
 
-	vec3 ambient = albedo.rgb * 0.1;
+	vec3 ambient = albedo.rgb * 0.25;	
+	vec3 fragcolor  = ambient;
+	fragcolor = vec3(0.0);
 	
-	// Ambient part
-    vec3 fragcolor  = ambient;
-	
-//    vec3 fragcolor  = albedo.rgb * ambient;
-    vec3 viewVec = normalize(ubo.viewPos.xyz - fragPos);
-	
-    for(int i = 0; i < lightCount; ++i)
-    {
-        // Distance from light to fragment position
-        float dist = length(ubo.lights[i].position.xyz - fragPos);
-		
-        if(dist < ubo.lights[i].radius)
-        {
-			// Get vector from current light source to fragment position
-            vec3 lightVec = normalize(ubo.lights[i].position.xyz - fragPos);
-            // Diffuse part
-            vec3 diffuse = max(dot(normal, lightVec), 0.0) * albedo.rgb * ubo.lights[i].color.rgb;
-            // Specular part (specular texture part stored in albedo alpha channel)
-            vec3 halfVec = normalize(lightVec + viewVec);  
-            vec3 specular = ubo.lights[i].color.rgb * pow(max(dot(normal, halfVec), 0.0), 16.0) * 1.0 * specularStrength;
-            // Attenuation with linearFalloff and quadraticFalloff falloff
-            float attenuation = 1.0 / (1.0 + ubo.lights[i].linearFalloff * dist + ubo.lights[i].quadraticFalloff * dist * dist);
-            fragcolor += (diffuse/* + specular*/) * attenuation;
-        }
-		
-    }    	
+	for(int i = 0; i < NUM_LIGHTS; ++i)
+	{
+		// Distance from light to fragment position
+		vec3 L = ubo.lights[i].position.xyz - fragPos;
+		float dist = length(L);
+		L = normalize(L);
+		vec3 N = normalize(normal);
+		vec3 R = reflect(-L, N);
+		float NdotR = max(0.0, dot(N, R));
+		float NdotL = max(0.0, dot(N, L));
+		float atten = ubo.lights[i].radius / (pow(dist, 2.0) + 1.0);
+		vec3 diff = ubo.lights[i].color.rgb * albedo.rgb * NdotL * atten;
+		vec3 spec = ubo.lights[i].color.rgb * specularStrength * pow(NdotR, 16.0) * atten;
+
+		fragcolor += diff + spec;				
+	}    	
    
   outFragcolor = vec4(fragcolor, 1.0);	
 }

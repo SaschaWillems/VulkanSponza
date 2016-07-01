@@ -566,7 +566,7 @@ public:
 	};
 
 	struct {
-		Light lights[7];
+		Light lights[13];
 		glm::vec4 viewPos;
 	} uboFragmentLights;
 
@@ -629,7 +629,7 @@ public:
 		camera.setRotation(glm::vec3(0.0f, -90.0f, 0.0f));
 		camera.setTranslation(glm::vec3(0.0f, 10.0f, 0.0f));
 
-		camera.movementSpeed = 20.0f;
+		camera.movementSpeed = 20.0f * 2.0f;
 
 		timerSpeed = 0.075f;
 		rotationSpeed = 0.15f;
@@ -1583,6 +1583,8 @@ public:
 			&uniformData.fsLights.memory,
 			&uniformData.fsLights.descriptor);
 
+		setupLights();
+
 		// Update
 		updateUniformBuffersScreen();
 		updateUniformBufferDeferredMatrices();
@@ -1624,61 +1626,67 @@ public:
 		return range * (rand() / double(RAND_MAX));
 	}
 
-	// Update fragment shader light position uniform block
-	void updateUniformBufferDeferredLights()
+	void setupLight(Light *light, glm::vec3 pos, glm::vec3 color, float radius)
 	{
-		/*
-		const float step = 20.0f;
-		for (int32_t i = 0; i < 64; i++)
-		{
-			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 20.0f, 10.0f, rnd(2.5f)-rnd(2.5f), 0.0f);
-//			uboFragmentLights.lights[i].position = glm::vec4((float)i * step - 32 * step, 5.0f, rnd(2.5f) - rnd(2.5f), 0.0f);
-			uboFragmentLights.lights[i].color = glm::vec4(rnd(1.0f), rnd(1.0f), rnd(1.0f), 1.0f);
-			uboFragmentLights.lights[i].radius = 25.0f;
-			uboFragmentLights.lights[i].linearFalloff = 0.02f;
-			uboFragmentLights.lights[i].quadraticFalloff = 0.15f;
-		}
-		*/
+		light->position = glm::vec4(pos, 1.0f);
+		light->color = glm::vec4(color, 1.0f);
+		light->radius = radius;
+		// linear and quadratic falloff not used with new shader
+	}
 
-		std::array<glm::vec4, 5> lightColors;
-		lightColors[0] = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
-		lightColors[1] = glm::vec4(1.0f);
-		lightColors[2] = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
-		lightColors[3] = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
-		lightColors[4] = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	// Initial light setup for the scene
+	void setupLights()
+	{	
+		// 5 fixed lights
+		std::array<glm::vec3, 5> lightColors;
+		lightColors[0] = glm::vec3(1.0f, 0.0f, 0.0f);
+		lightColors[1] = glm::vec3(1.0f);
+		lightColors[2] = glm::vec3(1.0f, 0.0f, 0.0f);
+		lightColors[3] = glm::vec3(0.0f, 0.0f, 1.0f);
+		lightColors[4] = glm::vec3(1.0f, 0.0f, 0.0f);
 
 		for (int32_t i = 0; i < lightColors.size(); i++)
 		{
-			uboFragmentLights.lights[i].position = glm::vec4((float)(i - 2.5f) * 50.0f, 10.0f, 0.0f, 0.0f);
-			uboFragmentLights.lights[i].color = lightColors[i];
-			uboFragmentLights.lights[i].radius = 100.0f;
-			uboFragmentLights.lights[i].linearFalloff = 0.004f;
-			uboFragmentLights.lights[i].quadraticFalloff = 0.003f;
+			setupLight(&uboFragmentLights.lights[i], glm::vec3((float)(i - 2.5f) * 50.0f, 10.0f, 0.0f), lightColors[i], 100.0f);
 		}
 
-		uboFragmentLights.lights[0].color = glm::vec4(1.0f);
+		// Dynamic light moving over the floor
+		setupLight(&uboFragmentLights.lights[0], { -sin(glm::radians(360.0f * timer)) * 120.0f , 2.5f, cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f }, glm::vec3(1.0f), 100.0f);
+
+		// Fire bowls
+		setupLight(&uboFragmentLights.lights[5], { -48.75f, 14.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
+		setupLight(&uboFragmentLights.lights[6], { -48.75f, 14.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
+		// -62.5, 15, -18.5
+		setupLight(&uboFragmentLights.lights[7], { 62.0f, 14.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
+		setupLight(&uboFragmentLights.lights[8], { 62.0f, 14.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
+
+		// 112.5 13.6 -42.8
+		setupLight(&uboFragmentLights.lights[9], { 120.0f, 20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+		setupLight(&uboFragmentLights.lights[10], { 120.0f, 20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+
+		setupLight(&uboFragmentLights.lights[11], { -110.0f, 20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+		setupLight(&uboFragmentLights.lights[12], { -110.0f, 20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+	}
+
+	// Update fragment shader light positions for moving light sources
+	void updateUniformBufferDeferredLights()
+	{
+		// Dynamic light moving over the floor
 		uboFragmentLights.lights[0].position.x = -sin(glm::radians(360.0f * timer)) * 120.0f;
-		uboFragmentLights.lights[0].position.y = 2.5f;
 		uboFragmentLights.lights[0].position.z = cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f;
 
-		uboFragmentLights.lights[5].position = glm::vec4(-60.0f, 15.0f, -13.0f, 0.0f);
+		// Fire bowls
+		/*
 		uboFragmentLights.lights[5].position.x += (2.5f * sin(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[5].position.z += (2.5f * cos(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[5].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
-		uboFragmentLights.lights[5].radius = 100.0f;
-		uboFragmentLights.lights[5].linearFalloff = 0.004f;
-		uboFragmentLights.lights[5].quadraticFalloff = 0.003f;
 
-		uboFragmentLights.lights[6].position = glm::vec4(-60.0f, 15.0f, 9.0f, 0.0f);
 		uboFragmentLights.lights[6].position.x += (2.5f * cos(glm::radians(360.0f * timer)));
 		uboFragmentLights.lights[6].position.z += (2.5f * sin(glm::radians(360.0f * timer)));
-		uboFragmentLights.lights[6].color = glm::vec4(1.0f, 0.6f, 0.0f, 1.0f);
-		uboFragmentLights.lights[6].radius = 100.0f;
-		uboFragmentLights.lights[6].linearFalloff = 0.004f;
-		uboFragmentLights.lights[6].quadraticFalloff = 0.003f;
+		*/
 
 		uboFragmentLights.viewPos = glm::vec4(-cameraPos, 0.0f);
 
+		// todo: map persistent
 		uint8_t *pData;
 		VK_CHECK_RESULT(vkMapMemory(device, uniformData.fsLights.memory, 0, VK_WHOLE_SIZE, 0, (void **)&pData));
 		memcpy(pData, &uboFragmentLights, sizeof(uboFragmentLights));
@@ -1758,21 +1766,19 @@ public:
 
 		if (!paused)
 		{
-			vkDeviceWaitIdle(device);
 			updateUniformBufferDeferredLights();
 		}
 	}
 
 	virtual void viewChanged()
 	{
-		vkDeviceWaitIdle(device);
 		updateUniformBufferDeferredMatrices();
+		updateTextOverlay();
 	}
 
 	void toggleDebugDisplay()
 	{
 		debugDisplay = !debugDisplay;
-		vkDeviceWaitIdle(device);
 		reBuildCommandBuffers();
 		updateUniformBuffersScreen();
 	}
@@ -1796,6 +1802,9 @@ public:
 #else
 		textOverlay->addText("Press \"1\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
 #endif
+		std::stringstream ss;
+		ss << camera;
+		textOverlay->addText(ss.str(), 5.0, 105.0f, VulkanTextOverlay::alignLeft);
 		// Render targets
 		if (debugDisplay)
 		{

@@ -41,5 +41,8 @@
     <ClInclude Include="..\base\vulkantextoverlay.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\base\camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -17,6 +17,7 @@
     <ClCompile Include="vulkansponza.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\base\camera.hpp" />
     <ClInclude Include="..\base\vulkandebug.h" />
     <ClInclude Include="..\base\vulkanexamplebase.h" />
     <ClInclude Include="..\base\vulkantextoverlay.hpp" />
