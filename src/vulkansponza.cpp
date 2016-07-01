@@ -30,20 +30,14 @@
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
 
-// Texture properties
-#define TEX_DIM 1024
-#define TEX_FILTER VK_FILTER_LINEAR
-
-// Offscreen frame buffer properties
-#define FB_DIM TEX_DIM
-
 // Vertex layout for this example
 std::vector<vkMeshLoader::VertexLayout> vertexLayout =
 {
 	vkMeshLoader::VERTEX_LAYOUT_POSITION,
 	vkMeshLoader::VERTEX_LAYOUT_UV,
 	vkMeshLoader::VERTEX_LAYOUT_COLOR,
-	vkMeshLoader::VERTEX_LAYOUT_NORMAL
+	vkMeshLoader::VERTEX_LAYOUT_NORMAL,
+	vkMeshLoader::VERTEX_LAYOUT_TANGENT
 };
 
 struct Vertex
@@ -52,7 +46,7 @@ struct Vertex
 	glm::vec2 uv;
 	glm::vec3 color;
 	glm::vec3 normal;
-	// todo : tangents
+	glm::vec3 tangent;
 };
 
 struct {
@@ -132,8 +126,6 @@ private:
 	{
 		materials.resize(aScene->mNumMaterials);
 		
-//		LOGD("Material count %d", materials.size());		
-
 		for (uint32_t i = 0; i < materials.size(); i++)
 		{
 			materials[i] = {};
@@ -147,16 +139,15 @@ private:
 
 			// Textures
 			aiString texturefile;
+			std::string diffuseMapFile;
 			// Diffuse
 			aScene->mMaterials[i]->GetTexture(aiTextureType_DIFFUSE, 0, &texturefile);
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_DIFFUSE) > 0)
 			{
 				std::cout << "  Diffuse: \"" << texturefile.C_Str() << "\"" << std::endl;
 				std::string fileName = std::string(texturefile.C_Str());
+				diffuseMapFile = fileName;
 				std::replace(fileName.begin(), fileName.end(), '\\', '/');
-#if defined(__ANDROID__)
-				LOGD("Diffuse texture %s from %s", texturefile.C_Str(), assetPath.c_str());
-#endif
 				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
 			}
 			else
@@ -169,11 +160,20 @@ private:
 			{
 				aScene->mMaterials[i]->GetTexture(aiTextureType_SPECULAR, 0, &texturefile);
 				std::cout << "  Specular: \"" << texturefile.C_Str() << "\"" << std::endl;
+				std::string fileName = std::string(texturefile.C_Str());
+				std::replace(fileName.begin(), fileName.end(), '\\', '/');
+				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].specular);
 			}
-			// Bump (map_bump is mapped to height by assimp)
-			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_HEIGHT) > 0)
+			else
 			{
-				aScene->mMaterials[i]->GetTexture(aiTextureType_HEIGHT, 0, &texturefile);
+				std::cout << "  Material has no specular, using dummy texture!" << std::endl;
+				textureLoader->loadTexture(assetPath + "sponza/dummy_specular.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].specular);
+			}
+
+			// Bump (map_bump is mapped to height by assimp)
+			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_NORMALS) > 0)
+			{
+				aScene->mMaterials[i]->GetTexture(aiTextureType_NORMALS, 0, &texturefile);
 				std::cout << "  Bump: \"" << texturefile.C_Str() << "\"" << std::endl;
 				std::string fileName = std::string(texturefile.C_Str());
 				std::replace(fileName.begin(), fileName.end(), '\\', '/');
@@ -183,22 +183,17 @@ private:
 			else
 			{
 				std::cout << "  Material has no bump, using dummy texture!" << std::endl;
-				textureLoader->loadTexture(assetPath + "sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].bump);
+				textureLoader->loadTexture(assetPath + "sponza/dummy_ddn.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].bump);
 			}
+
 			// Mask
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_OPACITY) > 0)
 			{
-				aScene->mMaterials[i]->GetTexture(aiTextureType_OPACITY, 0, &texturefile);
-				std::cout << "  Opacity: \"" << texturefile.C_Str() << "\"" << std::endl;
+				std::cout << "  Material has opacity, enabling alpha test" << std::endl;
 				materials[i].hasAlpha = true;
 			}
 
 			materials[i].pipeline = &pipelines.scene.solid;
-
-			if (materials[i].hasBump)
-			{
-//				materials[i].pipeline = &pipelines.scene.bump;
-			}
 		}
 
 	}
@@ -221,18 +216,16 @@ private:
 			vertices.resize(aMesh->mNumVertices);
 
 			bool hasUV = aMesh->HasTextureCoords(0);
+			bool hasTangent = aMesh->HasTangentsAndBitangents();
 
 			for (uint32_t i = 0; i < aMesh->mNumVertices; i++)
 			{
 				vertices[i].pos = glm::make_vec3(&aMesh->mVertices[i].x);
 				vertices[i].pos.y = -vertices[i].pos.y;
-				if (hasUV)
-				{
-					vertices[i].uv = glm::make_vec2(&aMesh->mTextureCoords[0][i].x);
-				}
+				vertices[i].uv = (hasUV) ? glm::make_vec2(&aMesh->mTextureCoords[0][i].x) : glm::vec3(0.0f);
 				vertices[i].normal = glm::make_vec3(&aMesh->mNormals[i].x);
 				vertices[i].color = glm::vec3(1.0f); // todo : take from material
-				// todo : tangents
+				vertices[i].tangent = (hasTangent) ? glm::make_vec3(&aMesh->mTangents[i].x) : glm::vec3(0.0f, 1.0f, 0.0f);
 			}
 
 			// Indices
@@ -364,7 +357,7 @@ private:
 		// Decriptor pool
 		std::vector<VkDescriptorPoolSize> poolSizes;
 		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, meshes.size()));
-		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshes.size() * 2));
+		poolSizes.push_back(vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshes.size() * 3));
 
 		VkDescriptorPoolCreateInfo descriptorPoolInfo =
 			vkTools::initializers::descriptorPoolCreateInfo(
@@ -376,21 +369,26 @@ private:
 
 		// Shared descriptor set layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
-		// Binding 0 : UBO
+		// Binding 0: UBO
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			VK_SHADER_STAGE_VERTEX_BIT,
 			0));
-		// Binding 1 : Diffuse
+		// Binding 1: Diffuse map
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_SHADER_STAGE_FRAGMENT_BIT,
 			1));
-		// Binding 2 : Bump
+		// Binding 2: Specular map
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_SHADER_STAGE_FRAGMENT_BIT,
 			2));
+		// Binding 3: Bump map
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			3));
 
 		VkDescriptorSetLayoutCreateInfo descriptorLayout =
 			vkTools::initializers::descriptorSetLayoutCreateInfo(
@@ -419,36 +417,33 @@ private:
 			// Background
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &meshes[i].descriptorSet));
 
-			std::vector<VkDescriptorImageInfo> texDescriptors;
-			texDescriptors.push_back(vkTools::initializers::descriptorImageInfo(
-				meshes[i].material->diffuse.sampler,
-				meshes[i].material->diffuse.view,
-				VK_IMAGE_LAYOUT_GENERAL));
-			texDescriptors.push_back(vkTools::initializers::descriptorImageInfo(
-				meshes[i].material->bump.sampler,
-				meshes[i].material->bump.view,
-				VK_IMAGE_LAYOUT_GENERAL));
-
-			// todo : additional maps
-
 			std::vector<VkWriteDescriptorSet> writeDescriptorSets;
 
 			// Binding 0 : Vertex shader uniform buffer
-			writeDescriptorSets.push_back(
-				vkTools::initializers::writeDescriptorSet(
-					meshes[i].descriptorSet,
-					VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-					0,
-					&defaultUBO->descriptor));
+			writeDescriptorSets.push_back(vkTools::initializers::writeDescriptorSet(
+				meshes[i].descriptorSet,
+				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				0,
+				&defaultUBO->descriptor));
 			// Image bindings
-			for (uint32_t j = 0; j < texDescriptors.size(); j++)
-			{
-				writeDescriptorSets.push_back(vkTools::initializers::writeDescriptorSet(
-					meshes[i].descriptorSet,
-					VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					1 + j,
-					&texDescriptors[j]));
-			}
+			// Binding 0: Color map
+			writeDescriptorSets.push_back(vkTools::initializers::writeDescriptorSet(
+				meshes[i].descriptorSet,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				1,
+				&meshes[i].material->diffuse.descriptor));
+			// Binding 1: Specular
+			writeDescriptorSets.push_back(vkTools::initializers::writeDescriptorSet(
+				meshes[i].descriptorSet,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				2,
+				&meshes[i].material->specular.descriptor));
+			// Binding 2: Normal
+			writeDescriptorSets.push_back(vkTools::initializers::writeDescriptorSet(
+				meshes[i].descriptorSet,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				3,
+				&meshes[i].material->bump.descriptor));
 
 			vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 		}
@@ -535,6 +530,7 @@ public:
 	Scene *scene;
 
 	bool debugDisplay = false;
+	bool attachLight = false;
 
 	struct {
 		vkTools::VulkanTexture colorMap;
@@ -626,9 +622,8 @@ public:
 
 		camera.type = Camera::CameraType::firstperson;
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 512.0f);
-		camera.setRotation(glm::vec3(0.0f, -90.0f, 0.0f));
-		camera.setTranslation(glm::vec3(0.0f, 10.0f, 0.0f));
-
+		camera.setRotation(glm::vec3(7.0f, -75.0f, 0.0f));
+		camera.setTranslation(glm::vec3(-81.0f, 6.25f, -14.0f));
 		camera.movementSpeed = 20.0f * 2.0f;
 
 		timerSpeed = 0.075f;
@@ -789,8 +784,8 @@ public:
 		VkCommandBuffer layoutCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
 		// todo : supersampling?
-		offScreenFrameBuf.width = width;
-		offScreenFrameBuf.height = height;
+		offScreenFrameBuf.width = width * 2;
+		offScreenFrameBuf.height = height * 2;
 
 		// Color attachments
 
@@ -1123,6 +1118,7 @@ public:
 			float uv[2];
 			float col[3];
 			float normal[3];
+			float tangent[3];
 		};
 
 		std::vector<Vertex> vertexBuffer;
@@ -1182,35 +1178,42 @@ public:
 				VK_VERTEX_INPUT_RATE_VERTEX);
 
 		// Attribute descriptions
-		vertices.attributeDescriptions.resize(4);
-		// Location 0 : Position
+		vertices.attributeDescriptions.resize(5);
+		// Location 0: Position
 		vertices.attributeDescriptions[0] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				0,
 				VK_FORMAT_R32G32B32_SFLOAT,
 				0);
-		// Location 1 : Texture coordinates
+		// Location 1: Texture coordinates
 		vertices.attributeDescriptions[1] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				1,
 				VK_FORMAT_R32G32_SFLOAT,
 				sizeof(float) * 3);
-		// Location 2 : Color
+		// Location 2: Color
 		vertices.attributeDescriptions[2] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				2,
 				VK_FORMAT_R32G32B32_SFLOAT,
 				sizeof(float) * 5);
-		// Location 3 : Normal
+		// Location 3: Normal
 		vertices.attributeDescriptions[3] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				3,
 				VK_FORMAT_R32G32B32_SFLOAT,
 				sizeof(float) * 8);
+		// Location 4: Tangent
+		vertices.attributeDescriptions[4] =
+			vkTools::initializers::vertexInputAttributeDescription(
+				VERTEX_BUFFER_BIND_ID,
+				4,
+				VK_FORMAT_R32G32B32_SFLOAT,
+				sizeof(float) * 11);
 
 		vertices.inputState = vkTools::initializers::pipelineVertexInputStateCreateInfo();
 		vertices.inputState.vertexBindingDescriptionCount = vertices.bindingDescriptions.size();
@@ -1293,11 +1296,16 @@ public:
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_SHADER_STAGE_FRAGMENT_BIT,
 			1));
-		// Binding 1 : Bump
+		// Binding 2: Specular
 		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_SHADER_STAGE_FRAGMENT_BIT,
 			2));
+		// Binding 3: Bump
+		setLayoutBindings.push_back(vkTools::initializers::descriptorSetLayoutBinding(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			3));
 
 		descriptorLayout.pBindings = setLayoutBindings.data();
 		descriptorLayout.bindingCount = setLayoutBindings.size();
@@ -1640,25 +1648,25 @@ public:
 		// 5 fixed lights
 		std::array<glm::vec3, 5> lightColors;
 		lightColors[0] = glm::vec3(1.0f, 0.0f, 0.0f);
-		lightColors[1] = glm::vec3(1.0f);
+		lightColors[1] = glm::vec3(1.0f, 0.7f, 0.7f);
 		lightColors[2] = glm::vec3(1.0f, 0.0f, 0.0f);
 		lightColors[3] = glm::vec3(0.0f, 0.0f, 1.0f);
 		lightColors[4] = glm::vec3(1.0f, 0.0f, 0.0f);
 
 		for (int32_t i = 0; i < lightColors.size(); i++)
 		{
-			setupLight(&uboFragmentLights.lights[i], glm::vec3((float)(i - 2.5f) * 50.0f, 10.0f, 0.0f), lightColors[i], 100.0f);
+			setupLight(&uboFragmentLights.lights[i], glm::vec3((float)(i - 2.5f) * 50.0f, 10.0f, 0.0f), lightColors[i], 120.0f);
 		}
 
 		// Dynamic light moving over the floor
 		setupLight(&uboFragmentLights.lights[0], { -sin(glm::radians(360.0f * timer)) * 120.0f , 2.5f, cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f }, glm::vec3(1.0f), 100.0f);
 
 		// Fire bowls
-		setupLight(&uboFragmentLights.lights[5], { -48.75f, 14.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
-		setupLight(&uboFragmentLights.lights[6], { -48.75f, 14.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
+		setupLight(&uboFragmentLights.lights[5], { -48.75f, 16.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
+		setupLight(&uboFragmentLights.lights[6], { -48.75f, 16.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
 		// -62.5, 15, -18.5
-		setupLight(&uboFragmentLights.lights[7], { 62.0f, 14.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
-		setupLight(&uboFragmentLights.lights[8], { 62.0f, 14.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 15.0f);
+		setupLight(&uboFragmentLights.lights[7], { 62.0f, 16.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
+		setupLight(&uboFragmentLights.lights[8], { 62.0f, 16.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
 
 		// 112.5 13.6 -42.8
 		setupLight(&uboFragmentLights.lights[9], { 120.0f, 20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
@@ -1671,9 +1679,18 @@ public:
 	// Update fragment shader light positions for moving light sources
 	void updateUniformBufferDeferredLights()
 	{
-		// Dynamic light moving over the floor
-		uboFragmentLights.lights[0].position.x = -sin(glm::radians(360.0f * timer)) * 120.0f;
-		uboFragmentLights.lights[0].position.z = cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f;
+		// Dynamic light
+		if (attachLight)
+		{
+			// Attach to camera position
+			uboFragmentLights.lights[0].position = glm::vec4(camera.position, 0.0f) * glm::vec4(-1.0f, 1.0f, -1.0f, 1.0f);
+		}
+		else
+		{
+			// Move across the floow
+			uboFragmentLights.lights[0].position.x = -sin(glm::radians(360.0f * timer)) * 120.0f;
+			uboFragmentLights.lights[0].position.z = cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f;
+		}
 
 		// Fire bowls
 		/*
@@ -1792,6 +1809,10 @@ public:
 			toggleDebugDisplay();
 			updateTextOverlay();
 			break;
+		case 0x4C:
+		case GAMEPAD_BUTTON_B:
+			attachLight = !attachLight;
+			break;
 		}
 	}
 
@@ -1802,9 +1823,11 @@ public:
 #else
 		textOverlay->addText("Press \"1\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
 #endif
+		/*
 		std::stringstream ss;
 		ss << camera;
 		textOverlay->addText(ss.str(), 5.0, 105.0f, VulkanTextOverlay::alignLeft);
+		*/
 		// Render targets
 		if (debugDisplay)
 		{

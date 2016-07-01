@@ -4,6 +4,7 @@
 #extension GL_ARB_shading_language_420pack : enable
 
 layout (binding = 1) uniform sampler2D samplerColor;
+layout (binding = 2) uniform sampler2D samplerSpecular;
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec2 inUV;
@@ -18,9 +19,12 @@ void main()
 {
 	outPosition = vec4(inWorldPos, 1.0);
 	outNormal = vec4(inNormal, 1.0);
-	outAlbedo = texture(samplerColor, inUV);
 
-	if (outAlbedo.a < 0.5)
+	vec4 color = texture(samplerColor, inUV);
+	float specular = texture(samplerSpecular, inUV).r;
+	outAlbedo = vec4(color);
+
+	if (color.a < 0.5)
 	{
 		discard;
 	}
