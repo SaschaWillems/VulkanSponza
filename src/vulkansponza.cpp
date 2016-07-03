@@ -494,7 +494,7 @@ public:
 	{
 		Assimp::Importer Importer;
 
-		int flags = aiProcess_FlipWindingOrder | aiProcess_PreTransformVertices | aiProcess_CalcTangentSpace;// | aiProcess_GenSmoothNormals;
+		int flags = aiProcess_FlipWindingOrder | aiProcess_PreTransformVertices | aiProcess_CalcTangentSpace;
 
 #if defined(__ANDROID__)
 		AAsset* asset = AAssetManager_open(assetManager, filename.c_str(), AASSET_MODE_STREAMING);
@@ -1701,7 +1701,7 @@ public:
 		uboFragmentLights.lights[6].position.z += (2.5f * sin(glm::radians(360.0f * timer)));
 		*/
 
-		uboFragmentLights.viewPos = glm::vec4(-cameraPos, 0.0f);
+		uboFragmentLights.viewPos = glm::vec4(camera.position, 0.0f) * glm::vec4(-1.0f, 1.0f, -1.0f, 1.0f);
 
 		// todo: map persistent
 		uint8_t *pData;
@@ -1823,11 +1823,9 @@ public:
 #else
 		textOverlay->addText("Press \"1\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
 #endif
-		/*
 		std::stringstream ss;
 		ss << camera;
 		textOverlay->addText(ss.str(), 5.0, 105.0f, VulkanTextOverlay::alignLeft);
-		*/
 		// Render targets
 		if (debugDisplay)
 		{

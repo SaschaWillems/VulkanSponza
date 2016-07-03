@@ -36,27 +36,38 @@ void main()
 	vec3 normal = texture(samplerNormal, inUV).rgb;
 	vec4 albedo = texture(samplerAlbedo, inUV);
 	
-	#define specularStrength 0.5
+	// todo: from specular map
+	#define specularStrength 1.0
 
-	vec3 ambient = vec3(0.0); //albedo.rgb * 0.025;	
+	vec3 ambient = vec3(0.0);	
 	vec3 fragcolor  = ambient;
 	
 	for(int i = 0; i < NUM_LIGHTS; ++i)
 	{
-		// Distance from light to fragment position
+		// Light to fragment
 		vec3 L = ubo.lights[i].position.xyz - fragPos;
 		float dist = length(L);
 		L = normalize(L);
-		vec3 N = normalize(normal);
-		vec3 R = reflect(-L, N);
-		float NdotR = max(0.0, dot(N, R));
-		float NdotL = max(0.0, dot(N, L));
+
+		// Viewer to fragment
+		vec3 V = ubo.viewPos.xyz - fragPos;
+		V = normalize(V);
+
+		// Attenuation
 		float atten = ubo.lights[i].radius / (pow(dist, 2.0) + 1.0);
+
+		// Diffuse part
+		vec3 N = normalize(normal);
+		float NdotL = max(0.0, dot(N, L));
 		vec3 diff = ubo.lights[i].color.rgb * albedo.rgb * NdotL * atten;
-		vec3 spec = ubo.lights[i].color.rgb * specularStrength * pow(NdotR, 8.0) * atten;
+
+		// Specular part
+		vec3 R = reflect(-L, N);
+		float NdotR = max(0.0, dot(R, V));
+		vec3 spec = ubo.lights[i].color.rgb * specularStrength * pow(NdotR, 16.0) * atten;
 
 		fragcolor += diff + spec;				
 	}    	
    
-  outFragcolor = vec4(fragcolor, 1.0);	
+	outFragcolor = vec4(fragcolor, 1.0);	
 }
