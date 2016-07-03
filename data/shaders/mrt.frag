@@ -15,12 +15,11 @@ layout (location = 4) in vec3 inTangent;
 
 layout (location = 0) out vec4 outPosition;
 layout (location = 1) out vec4 outNormal;
-layout (location = 2) out vec4 outAlbedo;
+layout (location = 2) out uvec4 outAlbedo;
 
 void main() 
 {
 	outPosition = vec4(inWorldPos, 1.0);
-//	outNormal = vec4(inNormal, 1.0);
 
 	vec3 N = normalize(inNormal);
 	vec3 T = normalize(inTangent);
@@ -30,7 +29,11 @@ void main()
 	nm = TBN * normalize(nm);
 	outNormal = vec4(nm, 0.0);
 
+	// Pack
 	vec4 color = texture(samplerColor, inUV);
 	float specular = texture(samplerSpecular, inUV).r;
-	outAlbedo = vec4(color);
+
+	outAlbedo.r = packHalf2x16(color.rg);
+	outAlbedo.g = packHalf2x16(color.ba);
+	outAlbedo.b = packHalf2x16(vec2(specular, 0.0));
 }

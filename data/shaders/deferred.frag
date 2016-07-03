@@ -5,7 +5,7 @@
 
 layout (binding = 1) uniform sampler2D samplerposition;
 layout (binding = 2) uniform sampler2D samplerNormal;
-layout (binding = 3) uniform sampler2D samplerAlbedo;
+layout (binding = 3) uniform usampler2D samplerAlbedo;
 
 layout (location = 0) in vec2 inUV;
 
@@ -20,7 +20,7 @@ struct Light {
 	float _pad;
 };
 
-#define NUM_LIGHTS 13
+#define NUM_LIGHTS 17
 
 layout (binding = 4) uniform UBO 
 {
@@ -34,10 +34,16 @@ void main()
 	// Get G-Buffer values
 	vec3 fragPos = texture(samplerposition, inUV).rgb;
 	vec3 normal = texture(samplerNormal, inUV).rgb;
-	vec4 albedo = texture(samplerAlbedo, inUV);
-	
-	// todo: from specular map
-	#define specularStrength 1.0
+
+	// unpack
+	ivec2 texDim = textureSize(samplerAlbedo, 0);
+	uvec4 albedo = texelFetch(samplerAlbedo, ivec2(inUV.st * texDim ), 0);
+
+	vec4 color;
+	color.rg = unpackHalf2x16(albedo.r);
+	color.ba = unpackHalf2x16(albedo.g);
+	vec4 spec;
+	spec.rg = unpackHalf2x16(albedo.b);	
 
 	vec3 ambient = vec3(0.0);	
 	vec3 fragcolor  = ambient;
@@ -59,12 +65,12 @@ void main()
 		// Diffuse part
 		vec3 N = normalize(normal);
 		float NdotL = max(0.0, dot(N, L));
-		vec3 diff = ubo.lights[i].color.rgb * albedo.rgb * NdotL * atten;
+		vec3 diff = ubo.lights[i].color.rgb * color.rgb * NdotL * atten;
 
 		// Specular part
 		vec3 R = reflect(-L, N);
 		float NdotR = max(0.0, dot(R, V));
-		vec3 spec = ubo.lights[i].color.rgb * specularStrength * pow(NdotR, 16.0) * atten;
+		vec3 spec = ubo.lights[i].color.rgb * spec.r * pow(NdotR, 16.0) * (atten * 1.5);
 
 		fragcolor += diff + spec;				
 	}    	
