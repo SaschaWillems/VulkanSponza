@@ -113,8 +113,8 @@ private:
 	VkDevice device;
 	VkQueue queue;
 	
-	// todo 
-	vkTools::UniformData *defaultUBO;
+	// todo: rename
+	vk::Buffer *defaultUBO;
 	
 	VkDescriptorPool descriptorPool;
 
@@ -463,7 +463,7 @@ public:
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkPipelineLayout pipelineLayout;
 
-	Scene(VkDevice device, VkQueue queue, vkTools::VulkanTextureLoader *textureloader, vkTools::UniformData *defaultUBO)
+	Scene(VkDevice device, VkQueue queue, vkTools::VulkanTextureLoader *textureloader, vk::Buffer *defaultUBO)
 	{
 		this->device = device;
 		this->queue = queue;
@@ -550,7 +550,7 @@ public:
 		glm::mat4 projection;
 		glm::mat4 model;
 		glm::mat4 view;
-	} uboVS, uboOffscreenVS;
+	} uboVS, uboSceneMatrices;
 
 	struct Light {
 		glm::vec4 position;
@@ -567,10 +567,10 @@ public:
 	} uboFragmentLights;
 
 	struct {
-		vkTools::UniformData vsFullScreen;
-		vkTools::UniformData vsOffscreen;
-		vkTools::UniformData fsLights;
-	} uniformData;
+		vk::Buffer fullScreen;
+		vk::Buffer sceneMatrices;
+		vk::Buffer sceneLights;
+	} uniformBuffers;
 
 	struct {
 		VkPipelineLayout deferred;
@@ -671,9 +671,9 @@ public:
 		vkMeshLoader::freeMeshBufferResources(device, &meshes.quad);
 
 		// Uniform buffers
-		vkTools::destroyUniformData(device, &uniformData.vsOffscreen);
-		vkTools::destroyUniformData(device, &uniformData.vsFullScreen);
-		vkTools::destroyUniformData(device, &uniformData.fsLights);
+		uniformBuffers.fullScreen.destroy();
+		uniformBuffers.sceneMatrices.destroy();
+		uniformBuffers.sceneLights.destroy();
 
 		vkFreeCommandBuffers(device, cmdPool, 1, &offScreenCmdBuffer);
 
@@ -1318,88 +1318,33 @@ public:
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.deferred));
 
 		// Image descriptor for the offscreen texture targets
-		VkDescriptorImageInfo texDescriptorPosition =
-			vkTools::initializers::descriptorImageInfo(
-				colorSampler,
-				offScreenFrameBuf.attachments[0].view,
-				VK_IMAGE_LAYOUT_GENERAL);
+		std::vector<VkDescriptorImageInfo> imageDescriptors;
+		imageDescriptors = {
+			vkTools::initializers::descriptorImageInfo(colorSampler, offScreenFrameBuf.attachments[0].view,	VK_IMAGE_LAYOUT_GENERAL),
+			vkTools::initializers::descriptorImageInfo(colorSampler, offScreenFrameBuf.attachments[1].view,	VK_IMAGE_LAYOUT_GENERAL),
+			vkTools::initializers::descriptorImageInfo(colorSampler, offScreenFrameBuf.attachments[2].view,	VK_IMAGE_LAYOUT_GENERAL),
+		};
 
-		VkDescriptorImageInfo texDescriptorNormal =
-			vkTools::initializers::descriptorImageInfo(
-				colorSampler,
-				offScreenFrameBuf.attachments[1].view,
-				VK_IMAGE_LAYOUT_GENERAL);
-
-		VkDescriptorImageInfo texDescriptorAlbedo =
-			vkTools::initializers::descriptorImageInfo(
-				colorSampler,
-				offScreenFrameBuf.attachments[2].view,
-				VK_IMAGE_LAYOUT_GENERAL);
-
-		std::vector<VkWriteDescriptorSet> writeDescriptorSets =
-		{
-			// Binding 0 : Vertex shader uniform buffer
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.deferred,
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				0,
-				&uniformData.vsFullScreen.descriptor),
-			// Binding 1 : Position texture target
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.deferred,
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				1,
-				&texDescriptorPosition),
-			// Binding 2 : Normals texture target
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.deferred,
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				2,
-				&texDescriptorNormal),
-			// Binding 3 : Albedo texture target
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.deferred,
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				3,
-				&texDescriptorAlbedo),
-			// Binding 4 : Fragment shader uniform buffer
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.deferred,
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				4,
-				&uniformData.fsLights.descriptor),
+		std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+		
+		writeDescriptorSets = {
+			vkTools::initializers::writeDescriptorSet(descriptorSets.deferred, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.fullScreen.descriptor),	// Binding 0 : Vertex shader uniform buffer			
+			vkTools::initializers::writeDescriptorSet(descriptorSets.deferred, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imageDescriptors[0]),				// Binding 1 : Position texture target			
+			vkTools::initializers::writeDescriptorSet(descriptorSets.deferred, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &imageDescriptors[1]),				// Binding 2 : Normals texture target			
+			vkTools::initializers::writeDescriptorSet(descriptorSets.deferred, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &imageDescriptors[2]),				// Binding 3 : Albedo texture target			
+			vkTools::initializers::writeDescriptorSet(descriptorSets.deferred, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4, &uniformBuffers.sceneLights.descriptor),	// Binding 4 : Fragment shader uniform buffer
 		};
 
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
 		// Offscreen (scene)
-
 		allocInfo.pSetLayouts = &descriptorSetLayouts.deferred;
-
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.offscreen));
-
-		VkDescriptorImageInfo texDescriptorSceneColormap =
-			vkTools::initializers::descriptorImageInfo(
-				textures.colorMap.sampler,
-				textures.colorMap.view,
-				VK_IMAGE_LAYOUT_GENERAL);
-
-		std::vector<VkWriteDescriptorSet> offScreenWriteDescriptorSets =
-		{
-			// Binding 0 : Vertex shader uniform buffer
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.offscreen,
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				0,
-				&uniformData.vsOffscreen.descriptor),
-			// Binding 1 : Scene color map
-			vkTools::initializers::writeDescriptorSet(
-				descriptorSets.offscreen,
-				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				1,
-				&texDescriptorSceneColormap)
+		writeDescriptorSets = {
+			vkTools::initializers::writeDescriptorSet(descriptorSets.offscreen, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),// Binding 0 : Vertex shader uniform buffer			
+			vkTools::initializers::writeDescriptorSet(descriptorSets.offscreen, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &textures.colorMap.descriptor)	// Binding 1 : Scene color map
 		};
-		vkUpdateDescriptorSets(device, offScreenWriteDescriptorSets.size(), offScreenWriteDescriptorSets.data(), 0, NULL);
+		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 	}
 
 	void preparePipelines()
@@ -1554,31 +1499,25 @@ public:
 	void prepareUniformBuffers()
 	{
 		// Fullscreen vertex shader
-		createBuffer(
+		vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			sizeof(uboVS),
-			&uboVS,
-			&uniformData.vsFullScreen.buffer,
-			&uniformData.vsFullScreen.memory,
-			&uniformData.vsFullScreen.descriptor);
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			&uniformBuffers.fullScreen,
+			sizeof(uboVS));
 
 		// Deferred vertex shader
-		createBuffer(
+		vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			sizeof(uboOffscreenVS),
-			&uboOffscreenVS,
-			&uniformData.vsOffscreen.buffer,
-			&uniformData.vsOffscreen.memory,
-			&uniformData.vsOffscreen.descriptor);
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			&uniformBuffers.sceneMatrices,
+			sizeof(uboSceneMatrices));
 
 		// Deferred fragment shader
-		createBuffer(
+		vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			sizeof(uboFragmentLights),
-			&uboFragmentLights,
-			&uniformData.fsLights.buffer,
-			&uniformData.fsLights.memory,
-			&uniformData.fsLights.descriptor);
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			&uniformBuffers.sceneLights,
+			sizeof(uboFragmentLights));
 
 		setupLights();
 
@@ -1600,22 +1539,22 @@ public:
 		}
 		uboVS.model = glm::mat4();
 
-		uint8_t *pData;
-		VK_CHECK_RESULT(vkMapMemory(device, uniformData.vsFullScreen.memory, 0, sizeof(uboVS), 0, (void **)&pData));
-		memcpy(pData, &uboVS, sizeof(uboVS));
-		vkUnmapMemory(device, uniformData.vsFullScreen.memory);
+		VK_CHECK_RESULT(uniformBuffers.fullScreen.map());
+		uniformBuffers.fullScreen.copyTo(&uboVS, sizeof(uboVS));
+		uniformBuffers.fullScreen.unmap();
 	}
 
 	void updateUniformBufferDeferredMatrices()
 	{
-		uboOffscreenVS.projection = camera.matrices.perspective;
-		uboOffscreenVS.view = camera.matrices.view;
-		uboOffscreenVS.model = glm::mat4();
+		uboSceneMatrices.projection = camera.matrices.perspective;
+		uboSceneMatrices.view = camera.matrices.view;
+		uboSceneMatrices.model = glm::mat4();
 
 		uint8_t *pData;
-		VK_CHECK_RESULT(vkMapMemory(device, uniformData.vsOffscreen.memory, 0, sizeof(uboOffscreenVS), 0, (void **)&pData));
-		memcpy(pData, &uboOffscreenVS, sizeof(uboOffscreenVS));
-		vkUnmapMemory(device, uniformData.vsOffscreen.memory);
+
+		VK_CHECK_RESULT(uniformBuffers.sceneMatrices.map());
+		uniformBuffers.sceneMatrices.copyTo(&uboSceneMatrices, sizeof(uboSceneMatrices));
+		uniformBuffers.sceneMatrices.unmap();
 	}
 
 	float rnd(float range)
@@ -1699,18 +1638,16 @@ public:
 
 		uboFragmentLights.viewPos = glm::vec4(camera.position, 0.0f) * glm::vec4(-1.0f, 1.0f, -1.0f, 1.0f);
 
-		// todo: map persistent
-		uint8_t *pData;
-		VK_CHECK_RESULT(vkMapMemory(device, uniformData.fsLights.memory, 0, VK_WHOLE_SIZE, 0, (void **)&pData));
-		memcpy(pData, &uboFragmentLights, sizeof(uboFragmentLights));
-		vkUnmapMemory(device, uniformData.fsLights.memory);
+		VK_CHECK_RESULT(uniformBuffers.sceneLights.map());
+		uniformBuffers.sceneLights.copyTo(&uboFragmentLights, sizeof(uboFragmentLights));
+		uniformBuffers.sceneLights.unmap();
 	}
 
 
 	void loadScene()
 	{
 		VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
-		scene = new Scene(device, queue, textureLoader, &uniformData.vsOffscreen);
+		scene = new Scene(device, queue, textureLoader, &uniformBuffers.sceneMatrices);
 
 #if defined(__ANDROID__)
 		scene->assetManager = androidApp->activity->assetManager;
