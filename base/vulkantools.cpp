@@ -630,14 +630,14 @@ VkDescriptorPoolSize vkTools::initializers::descriptorPoolSize(
 VkDescriptorSetLayoutBinding vkTools::initializers::descriptorSetLayoutBinding(
 	VkDescriptorType type, 
 	VkShaderStageFlags stageFlags, 
-	uint32_t binding)
+	uint32_t binding,
+	uint32_t count)
 {
 	VkDescriptorSetLayoutBinding setLayoutBinding = {};
 	setLayoutBinding.descriptorType = type;
 	setLayoutBinding.stageFlags = stageFlags;
 	setLayoutBinding.binding = binding;
-	// Default value in all examples
-	setLayoutBinding.descriptorCount = 1; 
+	setLayoutBinding.descriptorCount = count; 
 	return setLayoutBinding;
 }
 
@@ -662,6 +662,15 @@ VkPipelineLayoutCreateInfo vkTools::initializers::pipelineLayoutCreateInfo(
 	pipelineLayoutCreateInfo.pNext = NULL;
 	pipelineLayoutCreateInfo.setLayoutCount = setLayoutCount;
 	pipelineLayoutCreateInfo.pSetLayouts = pSetLayouts;
+	return pipelineLayoutCreateInfo;
+}
+
+VkPipelineLayoutCreateInfo vkTools::initializers::pipelineLayoutCreateInfo(
+	uint32_t setLayoutCount)
+{
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+	pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutCreateInfo.setLayoutCount = setLayoutCount;
 	return pipelineLayoutCreateInfo;
 }
 
@@ -783,7 +792,7 @@ VkPipelineRasterizationStateCreateInfo vkTools::initializers::pipelineRasterizat
 	pipelineRasterizationStateCreateInfo.cullMode = cullMode;
 	pipelineRasterizationStateCreateInfo.frontFace = frontFace;
 	pipelineRasterizationStateCreateInfo.flags = flags;
-	pipelineRasterizationStateCreateInfo.depthClampEnable = VK_TRUE;
+	pipelineRasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
 	pipelineRasterizationStateCreateInfo.lineWidth = 1.0f;
 	return pipelineRasterizationStateCreateInfo;
 }
@@ -901,4 +910,30 @@ VkPushConstantRange vkTools::initializers::pushConstantRange(
 	pushConstantRange.offset = offset;
 	pushConstantRange.size = size;
 	return pushConstantRange;
+}
+
+VkBindSparseInfo vkTools::initializers::bindSparseInfo()
+{
+	VkBindSparseInfo bindSparseInfo{};
+	bindSparseInfo.sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO;
+	return bindSparseInfo;
+}
+
+VkSpecializationMapEntry vkTools::initializers::specializationMapEntry(uint32_t constantID, uint32_t offset, size_t size)
+{
+	VkSpecializationMapEntry specializationEntry{};
+	specializationEntry.constantID = constantID;
+	specializationEntry.offset = offset;
+	specializationEntry.size = size;
+	return specializationEntry;
+}
+
+VkSpecializationInfo vkTools::initializers::specializationInfo(uint32_t mapEntryCount, const VkSpecializationMapEntry* mapEntries, size_t dataSize, const void* data)
+{
+	VkSpecializationInfo specializationInfo{};
+	specializationInfo.mapEntryCount = mapEntryCount;
+	specializationInfo.pMapEntries = mapEntries;
+	specializationInfo.dataSize = dataSize;
+	specializationInfo.pData = data;
+	return specializationInfo;
 }

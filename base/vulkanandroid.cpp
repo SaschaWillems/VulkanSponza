@@ -32,6 +32,8 @@ PFN_vkCreateBuffer vkCreateBuffer;
 PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
 PFN_vkMapMemory vkMapMemory;
 PFN_vkUnmapMemory vkUnmapMemory;
+PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
+PFN_vkInvalidateMappedMemoryRanges vkInvalidateMappedMemoryRanges;
 PFN_vkBindBufferMemory vkBindBufferMemory;
 PFN_vkDestroyBuffer vkDestroyBuffer;
 PFN_vkAllocateMemory vkAllocateMemory;
@@ -89,6 +91,8 @@ PFN_vkCmdSetDepthBias vkCmdSetDepthBias;
 PFN_vkCmdPushConstants vkCmdPushConstants;
 PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
 PFN_vkCmdDraw vkCmdDraw;
+PFN_vkCmdDrawIndexedIndirect vkCmdDrawIndexedIndirect;
+PFN_vkCmdDrawIndirect vkCmdDrawIndirect;
 PFN_vkCmdDispatch vkCmdDispatch;
 PFN_vkDestroyPipeline vkDestroyPipeline;
 PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
@@ -159,6 +163,8 @@ void loadVulkanFunctions(VkInstance instance)
 	vkGetBufferMemoryRequirements = reinterpret_cast<PFN_vkGetBufferMemoryRequirements>(vkGetInstanceProcAddr(instance, "vkGetBufferMemoryRequirements"));
 	vkMapMemory = reinterpret_cast<PFN_vkMapMemory>(vkGetInstanceProcAddr(instance, "vkMapMemory"));
 	vkUnmapMemory = reinterpret_cast<PFN_vkUnmapMemory>(vkGetInstanceProcAddr(instance, "vkUnmapMemory"));
+	vkFlushMappedMemoryRanges = reinterpret_cast<PFN_vkFlushMappedMemoryRanges>(vkGetInstanceProcAddr(instance, "vkFlushMappedMemoryRanges"));
+	vkInvalidateMappedMemoryRanges = reinterpret_cast<PFN_vkInvalidateMappedMemoryRanges>(vkGetInstanceProcAddr(instance, "vkInvalidateMappedMemoryRanges"));
 	vkBindBufferMemory = reinterpret_cast<PFN_vkBindBufferMemory>(vkGetInstanceProcAddr(instance, "vkBindBufferMemory"));
 	vkDestroyBuffer = reinterpret_cast<PFN_vkDestroyBuffer>(vkGetInstanceProcAddr(instance, "vkDestroyBuffer"));
 
@@ -234,6 +240,8 @@ void loadVulkanFunctions(VkInstance instance)
 
 	vkCmdDrawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>(vkGetInstanceProcAddr(instance, "vkCmdDrawIndexed"));
 	vkCmdDraw = reinterpret_cast<PFN_vkCmdDraw>(vkGetInstanceProcAddr(instance, "vkCmdDraw"));
+	vkCmdDrawIndexedIndirect = reinterpret_cast<PFN_vkCmdDrawIndexedIndirect>(vkGetInstanceProcAddr(instance, "vkCmdDrawIndexedIndirect"));
+	vkCmdDrawIndirect = reinterpret_cast<PFN_vkCmdDrawIndirect>(vkGetInstanceProcAddr(instance, "vkCmdDrawIndirect"));
 	vkCmdDispatch = reinterpret_cast<PFN_vkCmdDispatch>(vkGetInstanceProcAddr(instance, "vkCmdDispatch"));
 
 	vkDestroyPipeline = reinterpret_cast<PFN_vkDestroyPipeline>(vkGetInstanceProcAddr(instance, "vkDestroyPipeline"));

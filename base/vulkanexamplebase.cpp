@@ -8,6 +8,8 @@
 
 #include "vulkanexamplebase.h"
 
+std::vector<const char*> VulkanExampleBase::args;
+
 VkResult VulkanExampleBase::createInstance(bool enableValidation)
 {
 	this->enableValidation = enableValidation;
@@ -25,6 +27,8 @@ VkResult VulkanExampleBase::createInstance(bool enableValidation)
 	enabledExtensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined(__ANDROID__)
 	enabledExtensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+#elif defined(_DIRECT2DISPLAY)
+	enabledExtensions.push_back(VK_KHR_DISPLAY_EXTENSION_NAME);
 #elif defined(__linux__)
 	enabledExtensions.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
 #endif
@@ -50,38 +54,15 @@ VkResult VulkanExampleBase::createInstance(bool enableValidation)
 	return vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
 }
 
-VkResult VulkanExampleBase::createDevice(VkDeviceQueueCreateInfo requestedQueues, bool enableValidation)
-{
-	std::vector<const char*> enabledExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-
-	VkDeviceCreateInfo deviceCreateInfo = {};
-	deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	deviceCreateInfo.pNext = NULL;
-	deviceCreateInfo.queueCreateInfoCount = 1;
-	deviceCreateInfo.pQueueCreateInfos = &requestedQueues;
-	deviceCreateInfo.pEnabledFeatures = &enabledFeatures;
-
-	// enable the debug marker extension if it is present (likely meaning a debugging tool is present)
-	if (vkTools::checkDeviceExtensionPresent(physicalDevice, VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
-	{
-		enabledExtensions.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
-		enableDebugMarkers = true;
-	}
-
-	if (enabledExtensions.size() > 0)
-	{
-		deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledExtensions.size();
-		deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions.data();
-	}
-
-	return vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device);
-}
-
 std::string VulkanExampleBase::getWindowTitle()
 {
 	std::string device(deviceProperties.deviceName);
 	std::string windowTitle;
-	windowTitle = title + " - " + device + " - " + std::to_string(frameCounter) + " fps";
+	windowTitle = title + " - " + device;
+	if (!enableTextOverlay)
+	{
+		windowTitle += " - " + std::to_string(frameCounter) + " fps";
+	}
 	return windowTitle;
 }
 
@@ -108,16 +89,8 @@ bool VulkanExampleBase::checkCommandBuffers()
 
 void VulkanExampleBase::createCommandBuffers()
 {
-	// Create one command buffer per frame buffer
-	// in the swap chain
-	// Command buffers store a reference to the
-	// frame buffer inside their render pass info
-	// so for static usage withouth having to rebuild
-	// them each frame, we use one per frame buffer
-
+	// Create one command buffer for each swap chain image and reuse for rendering
 	drawCmdBuffers.resize(swapChain.imageCount);
-	prePresentCmdBuffers.resize(swapChain.imageCount);
-	postPresentCmdBuffers.resize(swapChain.imageCount);
 
 	VkCommandBufferAllocateInfo cmdBufAllocateInfo =
 		vkTools::initializers::commandBufferAllocateInfo(
@@ -126,18 +99,11 @@ void VulkanExampleBase::createCommandBuffers()
 			static_cast<uint32_t>(drawCmdBuffers.size()));
 
 	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, drawCmdBuffers.data()));
-
-	// Command buffers for submitting present barriers
-	// One pre and post present buffer per swap chain image
-	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, prePresentCmdBuffers.data()));
-	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, postPresentCmdBuffers.data()));
 }
 
 void VulkanExampleBase::destroyCommandBuffers()
 {
 	vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(drawCmdBuffers.size()), drawCmdBuffers.data());
-	vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(drawCmdBuffers.size()), prePresentCmdBuffers.data());
-	vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(drawCmdBuffers.size()), postPresentCmdBuffers.data());
 }
 
 void VulkanExampleBase::createSetupCommandBuffer()
@@ -235,15 +201,7 @@ void VulkanExampleBase::createPipelineCache()
 
 void VulkanExampleBase::prepare()
 {
-	if (enableValidation)
-	{
-		// The report flags determine what type of messages for the layers will be displayed
-		// For validating (debugging) an appplication the error and warning bits should suffice
-		VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT; // VK_DEBUG_REPORT_WARNING_BIT_EXT (enable to also display warnings)
-		// Additional flags include performance info, loader and layer debug messages, etc.
-		vkDebug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
-	}
-	if (enableDebugMarkers)
+	if (vulkanDevice->enableDebugMarkers)
 	{
 		vkDebug::DebugMarker::setup(device);
 	}
@@ -251,7 +209,6 @@ void VulkanExampleBase::prepare()
 	createSetupCommandBuffer();
 	setupSwapChain();
 	createCommandBuffers();
-	buildPresentCommandBuffers();
 	setupDepthStencil();
 	setupRenderPass();
 	createPipelineCache();
@@ -260,7 +217,7 @@ void VulkanExampleBase::prepare()
 	// Recreate setup command buffer for derived class
 	createSetupCommandBuffer();
 	// Create a simple texture loader class
-	textureLoader = new vkTools::VulkanTextureLoader(physicalDevice, device, queue, cmdPool);
+	textureLoader = new vkTools::VulkanTextureLoader(vulkanDevice, queue, cmdPool);
 #if defined(__ANDROID__)
 	textureLoader->assetManager = androidApp->activity->assetManager;
 #endif
@@ -271,8 +228,7 @@ void VulkanExampleBase::prepare()
 		shaderStages.push_back(loadShader(getAssetPath() + "shaders/base/textoverlay.vert.spv", VK_SHADER_STAGE_VERTEX_BIT));
 		shaderStages.push_back(loadShader(getAssetPath() + "shaders/base/textoverlay.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT));
 		textOverlay = new VulkanTextOverlay(
-			physicalDevice,
-			device,
+			vulkanDevice,
 			queue,
 			frameBuffers,
 			colorformat,
@@ -311,7 +267,7 @@ VkBool32 VulkanExampleBase::createBuffer(VkBufferUsageFlags usageFlags, VkMemory
 
 	vkGetBufferMemoryRequirements(device, *buffer, &memReqs);
 	memAlloc.allocationSize = memReqs.size;
-	memAlloc.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+	memAlloc.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
 	VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, memory));
 	if (data != nullptr)
 	{
@@ -362,13 +318,18 @@ VkBool32 VulkanExampleBase::createBuffer(VkBufferUsageFlags usage, VkMemoryPrope
 	}
 }
 
-void VulkanExampleBase::loadMesh(
-	std::string filename,
-	vkMeshLoader::MeshBuffer * meshBuffer,
-	std::vector<vkMeshLoader::VertexLayout> vertexLayout,
-	float scale)
+void VulkanExampleBase::loadMesh(std::string filename, vkMeshLoader::MeshBuffer * meshBuffer, std::vector<vkMeshLoader::VertexLayout> vertexLayout, float scale)
 {
-	VulkanMeshLoader *mesh = new VulkanMeshLoader();
+	vkMeshLoader::MeshCreateInfo meshCreateInfo;
+	meshCreateInfo.scale = glm::vec3(scale);
+	meshCreateInfo.center = glm::vec3(0.0f);
+	meshCreateInfo.uvscale = glm::vec2(1.0f);
+	loadMesh(filename, meshBuffer, vertexLayout, &meshCreateInfo);
+}
+
+void VulkanExampleBase::loadMesh(std::string filename, vkMeshLoader::MeshBuffer * meshBuffer, std::vector<vkMeshLoader::VertexLayout> vertexLayout, vkMeshLoader::MeshCreateInfo *meshCreateInfo)
+{
+	VulkanMeshLoader *mesh = new VulkanMeshLoader(vulkanDevice);
 
 #if defined(__ANDROID__)
 	mesh->assetManager = androidApp->activity->assetManager;
@@ -380,11 +341,9 @@ void VulkanExampleBase::loadMesh(
 	VkCommandBuffer copyCmd = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
 
 	mesh->createBuffers(
-		device,
-		deviceMemoryProperties,
 		meshBuffer,
 		vertexLayout,
-		scale,
+		meshCreateInfo,
 		true,
 		copyCmd,
 		queue);
@@ -405,18 +364,23 @@ void VulkanExampleBase::renderLoop()
 	while (TRUE)
 	{
 		auto tStart = std::chrono::high_resolution_clock::now();
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		if (viewUpdated)
 		{
-			if (msg.message == WM_QUIT)
-			{
-				break;
-			}
-			else
-			{
-				TranslateMessage(&msg);
-				DispatchMessage(&msg);
-			}
+			viewUpdated = false;
+			viewChanged();
 		}
+
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+
+		if (msg.message == WM_QUIT)
+		{
+			break;
+		}
+
 		render();
 		frameCounter++;
 		auto tEnd = std::chrono::high_resolution_clock::now();
@@ -425,7 +389,7 @@ void VulkanExampleBase::renderLoop()
 		camera.update(frameTimer);
 		if (camera.moving())
 		{
-			viewChanged();
+			viewUpdated = true;
 		}
 		// Convert to clamped timer value
 		if (!paused)
@@ -439,12 +403,12 @@ void VulkanExampleBase::renderLoop()
 		fpsTimer += (float)tDiff;
 		if (fpsTimer > 1000.0f)
 		{
-			std::string windowTitle = getWindowTitle();
 			if (!enableTextOverlay)
 			{
+				std::string windowTitle = getWindowTitle();
 				SetWindowText(window, windowTitle.c_str());
 			}
-			lastFPS = frameCounter;
+			lastFPS = roundf(1.0f / frameTimer);
 			updateTextOverlay();
 			fpsTimer = 0.0f;
 			frameCounter = 0;
@@ -549,14 +513,55 @@ void VulkanExampleBase::renderLoop()
 			}
 		}
 	}
+#elif defined(_DIRECT2DISPLAY)
+	while (!quit)
+	{
+		auto tStart = std::chrono::high_resolution_clock::now();
+		if (viewUpdated)
+		{
+			viewUpdated = false;
+			viewChanged();
+		}
+		render();
+		frameCounter++;
+		auto tEnd = std::chrono::high_resolution_clock::now();
+		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+		frameTimer = tDiff / 1000.0f;
+		camera.update(frameTimer);
+		if (camera.moving())
+		{
+			viewUpdated = true;
+		}
+		// Convert to clamped timer value
+		if (!paused)
+		{
+			timer += timerSpeed * frameTimer;
+			if (timer > 1.0)
+			{
+				timer -= 1.0f;
+			}
+		}
+		fpsTimer += (float)tDiff;
+		if (fpsTimer > 1000.0f)
+		{
+			lastFPS = frameCounter;
+			updateTextOverlay();
+			fpsTimer = 0.0f;
+			frameCounter = 0;
+		}
+	}
 #elif defined(__linux__)
 	xcb_flush(connection);
 	while (!quit)
 	{
 		auto tStart = std::chrono::high_resolution_clock::now();
+		if (viewUpdated)
+		{
+			viewUpdated = false;
+			viewChanged();
+		}
 		xcb_generic_event_t *event;
-		event = xcb_poll_for_event(connection);
-		if (event)
+		while ((event = xcb_poll_for_event(connection)))
 		{
 			handleEvent(event);
 			free(event);
@@ -567,6 +572,10 @@ void VulkanExampleBase::renderLoop()
 		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
 		frameTimer = tDiff / 1000.0f;
 		camera.update(frameTimer);
+		if (camera.moving())
+		{
+			viewUpdated = true;
+		}
 		// Convert to clamped timer value
 		if (!paused)
 		{
@@ -597,21 +606,6 @@ void VulkanExampleBase::renderLoop()
 	vkDeviceWaitIdle(device);
 }
 
-VkSubmitInfo VulkanExampleBase::prepareSubmitInfo(
-	std::vector<VkCommandBuffer> commandBuffers,
-	VkPipelineStageFlags *pipelineStages)
-{
-	VkSubmitInfo submitInfo = vkTools::initializers::submitInfo();
-	submitInfo.pWaitDstStageMask = pipelineStages;
-	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &semaphores.presentComplete;
-	submitInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
-	submitInfo.pCommandBuffers = commandBuffers.data();
-	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &semaphores.renderComplete;
-	return submitInfo;
-}
-
 void VulkanExampleBase::updateTextOverlay()
 {
 	if (!enableTextOverlay)
@@ -622,7 +616,7 @@ void VulkanExampleBase::updateTextOverlay()
 	textOverlay->addText(title, 5.0f, 5.0f, VulkanTextOverlay::alignLeft);
 
 	std::stringstream ss;
-	ss << std::fixed << std::setprecision(2) << (frameTimer * 1000.0f) << "ms (" << lastFPS << " fps)";
+	ss << std::fixed << std::setprecision(3) << (frameTimer * 1000.0f) << "ms (" << lastFPS << " fps)";
 	textOverlay->addText(ss.str(), 5.0f, 25.0f, VulkanTextOverlay::alignLeft);
 
 	textOverlay->addText(deviceProperties.deviceName, 5.0f, 45.0f, VulkanTextOverlay::alignLeft);
@@ -641,12 +635,6 @@ void VulkanExampleBase::prepareFrame()
 {
 	// Acquire the next image from the swap chaing
 	VK_CHECK_RESULT(swapChain.acquireNextImage(semaphores.presentComplete, &currentBuffer));
-
-	// Submit post present image barrier to transform the image back to a color attachment that our render pass can write to
-	VkSubmitInfo submitInfo = vkTools::initializers::submitInfo();
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &postPresentCmdBuffers[currentBuffer];
-	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
 }
 
 void VulkanExampleBase::submitFrame()
@@ -683,12 +671,6 @@ void VulkanExampleBase::submitFrame()
 		submitInfo.pSignalSemaphores = &semaphores.renderComplete;
 	}
 
-	// Submit pre present image barrier to transform the image from color attachment to present(khr) for presenting to the swap chain
-	VkSubmitInfo submitInfo = vkTools::initializers::submitInfo();
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &prePresentCmdBuffers[currentBuffer];
-	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-
 	VK_CHECK_RESULT(swapChain.queuePresent(queue, currentBuffer, submitTextOverlay ? semaphores.textOverlayComplete : semaphores.renderComplete));
 
 	VK_CHECK_RESULT(vkQueueWaitIdle(queue));
@@ -696,23 +678,24 @@ void VulkanExampleBase::submitFrame()
 
 VulkanExampleBase::VulkanExampleBase(bool enableValidation, PFN_GetEnabledFeatures enabledFeaturesFn)
 {
-	// Check for validation command line flag
-#if defined(_WIN32)
-	for (int32_t i = 0; i < __argc; i++)
+	// Parse command line arguments
+	for (auto arg : args)
 	{
-		if (__argv[i] == std::string("-validation"))
+		if (arg == std::string("-validation"))
 		{
 			enableValidation = true;
 		}
-		if (__argv[i] == std::string("-vsync"))
+		if (arg == std::string("-vsync"))
 		{
 			enableVSync = true;
 		}
 	}
-#elif defined(__ANDROID__)
+#if defined(__ANDROID__)
 	// Vulkan library is loaded dynamically on Android
 	bool libLoaded = loadVulkanLibrary();
 	assert(libLoaded);
+#elif defined(_DIRECT2DISPLAY)
+
 #elif defined(__linux__)
 	initxcbConnection();
 #endif
@@ -722,11 +705,6 @@ VulkanExampleBase::VulkanExampleBase(bool enableValidation, PFN_GetEnabledFeatur
 		this->enabledFeatures = enabledFeaturesFn();
 	}
 
-#if !defined(__ANDROID__)
-	// Android Vulkan initialization is handled in APP_CMD_INIT_WINDOW event
-	initVulkan(enableValidation);
-#endif
-
 #if defined(_WIN32)
 	// Enable console if validation is active
 	// Debug message callback will output to it
@@ -734,6 +712,11 @@ VulkanExampleBase::VulkanExampleBase(bool enableValidation, PFN_GetEnabledFeatur
 	{
 		setupConsole("VulkanExample");
 	}
+#endif
+
+#if !defined(__ANDROID__)
+	// Android Vulkan initialization is handled in APP_CMD_INIT_WINDOW event
+	initVulkan(enableValidation);
 #endif
 }
 
@@ -783,7 +766,7 @@ VulkanExampleBase::~VulkanExampleBase()
 		delete textOverlay;
 	}
 
-	vkDestroyDevice(device, nullptr);
+	delete vulkanDevice;
 
 	if (enableValidation)
 	{
@@ -792,7 +775,9 @@ VulkanExampleBase::~VulkanExampleBase()
 
 	vkDestroyInstance(instance, nullptr);
 
-#if defined(__linux)
+#if defined(_DIRECT2DISPLAY)
+
+#elif defined(__linux)
 #if defined(__ANDROID__)
 	// todo : android cleanup (if required)
 #else
@@ -817,6 +802,16 @@ void VulkanExampleBase::initVulkan(bool enableValidation)
 	loadVulkanFunctions(instance);
 #endif
 
+	// If requested, we enable the default validation layers for debugging
+	if (enableValidation)
+	{
+		// The report flags determine what type of messages for the layers will be displayed
+		// For validating (debugging) an appplication the error and warning bits should suffice
+		VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT; // | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+		// Additional flags include performance info, loader and layer debug messages, etc.
+		vkDebug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
+	}
+
 	// Physical device
 	uint32_t gpuCount = 0;
 	// Get number of available physical devices
@@ -827,7 +822,7 @@ void VulkanExampleBase::initVulkan(bool enableValidation)
 	err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
 	if (err)
 	{
-		vkTools::exitFatal("Could not enumerate phyiscal devices : \n" + vkTools::errorString(err), "Fatal error");
+		vkTools::exitFatal("Could not enumerate physical devices : \n" + vkTools::errorString(err), "Fatal error");
 	}
 
 	// Note :
@@ -836,43 +831,23 @@ void VulkanExampleBase::initVulkan(bool enableValidation)
 	// and want to use another one
 	physicalDevice = physicalDevices[0];
 
-	// Find a queue that supports graphics operations
-	uint32_t graphicsQueueIndex = 0;
-	uint32_t queueCount;
-	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, NULL);
-	assert(queueCount >= 1);
+	// Vulkan device creation
+	// This is handled by a separate class that gets a logical device representation
+	// and encapsulates functions related to a device
+	vulkanDevice = new vk::VulkanDevice(physicalDevice);
+	VK_CHECK_RESULT(vulkanDevice->createLogicalDevice(enabledFeatures));
+	device = vulkanDevice->logicalDevice;
 
-	std::vector<VkQueueFamilyProperties> queueProps;
-	queueProps.resize(queueCount);
-	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, queueProps.data());
-
-	for (graphicsQueueIndex = 0; graphicsQueueIndex < queueCount; graphicsQueueIndex++)
-	{
-		if (queueProps[graphicsQueueIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-			break;
-	}
-	assert(graphicsQueueIndex < queueCount);
-
-	// Vulkan device
-	std::array<float, 1> queuePriorities = { 0.0f };
-	VkDeviceQueueCreateInfo queueCreateInfo = {};
-	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queueCreateInfo.queueFamilyIndex = graphicsQueueIndex;
-	queueCreateInfo.queueCount = 1;
-	queueCreateInfo.pQueuePriorities = queuePriorities.data();
-
-	VK_CHECK_RESULT(createDevice(queueCreateInfo, enableValidation));
-
+	// todo: remove
 	// Store properties (including limits) and features of the phyiscal device
 	// So examples can check against them and see if a feature is actually supported
 	vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
 	vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
-
 	// Gather physical device memory properties
 	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
 
-	// Get the graphics queue
-	vkGetDeviceQueue(device, graphicsQueueIndex, 0, &queue);
+	// Get a graphics queue from the device
+	vkGetDeviceQueue(device, vulkanDevice->queueFamilyIndices.graphics, 0, &queue);
 
 	// Find a suitable depth format
 	VkBool32 validDepthFormat = vkTools::getSupportedDepthFormat(physicalDevice, &depthFormat);
@@ -913,10 +888,6 @@ void VulkanExampleBase::setupConsole(std::string title)
 	FILE *stream;
 	freopen_s(&stream, "CONOUT$", "w+", stdout);
 	SetConsoleTitle(TEXT(title.c_str()));
-	if (enableValidation)
-	{
-		std::cout << "Validation enabled:\n";
-	}
 }
 
 HWND VulkanExampleBase::setupWindow(HINSTANCE hinstance, WNDPROC wndproc)
@@ -924,11 +895,9 @@ HWND VulkanExampleBase::setupWindow(HINSTANCE hinstance, WNDPROC wndproc)
 	this->windowInstance = hinstance;
 
 	bool fullscreen = false;
-
-	// Check command line arguments
-	for (int32_t i = 0; i < __argc; i++)
+	for (auto arg : args)
 	{
-		if (__argv[i] == std::string("-fullscreen"))
+		if (arg == std::string("-fullscreen"))
 		{
 			fullscreen = true;
 		}
@@ -1001,20 +970,10 @@ HWND VulkanExampleBase::setupWindow(HINSTANCE hinstance, WNDPROC wndproc)
 	}
 
 	RECT windowRect;
-	if (fullscreen)
-	{
-		windowRect.left = (long)0;
-		windowRect.right = (long)screenWidth;
-		windowRect.top = (long)0;
-		windowRect.bottom = (long)screenHeight;
-	}
-	else
-	{
-		windowRect.left = (long)screenWidth / 2 - width / 2;
-		windowRect.right = (long)width;
-		windowRect.top = (long)screenHeight / 2 - height / 2;
-		windowRect.bottom = (long)height;
-	}
+	windowRect.left = 0L;
+	windowRect.top = 0L;
+	windowRect.right = fullscreen ? (long)screenWidth : (long)width;
+	windowRect.bottom = fullscreen ? (long)screenHeight : (long)height;
 
 	AdjustWindowRectEx(&windowRect, dwStyle, FALSE, dwExStyle);
 
@@ -1023,14 +982,22 @@ HWND VulkanExampleBase::setupWindow(HINSTANCE hinstance, WNDPROC wndproc)
 		name.c_str(),
 		windowTitle.c_str(),
 		dwStyle | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-		windowRect.left,
-		windowRect.top,
-		windowRect.right,
-		windowRect.bottom,
+		0,
+		0,
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
 		NULL,
 		NULL,
 		hinstance,
 		NULL);
+
+	if (!fullscreen)
+	{
+		// Center on screen
+		uint32_t x = (GetSystemMetrics(SM_CXSCREEN) - windowRect.right) / 2;
+		uint32_t y = (GetSystemMetrics(SM_CYSCREEN) - windowRect.bottom) / 2;
+		SetWindowPos(window, 0, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+	}
 
 	if (!window)
 	{
@@ -1062,16 +1029,16 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 	case WM_KEYDOWN:
 		switch (wParam)
 		{
-		case 0x50:
+		case KEY_P:
 			paused = !paused;
 			break;
-		case VK_F1:
+		case KEY_F1:
 			if (enableTextOverlay)
 			{
 				textOverlay->visible = !textOverlay->visible;
 			}
 			break;
-		case VK_ESCAPE:
+		case KEY_ESCAPE:
 			PostQuitMessage(0);
 			break;
 		}
@@ -1080,16 +1047,16 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 		{
 			switch (wParam)
 			{
-			case 0x57:
+			case KEY_W:
 				camera.keys.up = true;
 				break;
-			case 0x53:
+			case KEY_S:
 				camera.keys.down = true;
 				break;
-			case 0x41:
+			case KEY_A:
 				camera.keys.left = true;
 				break;
-			case 0x44:
+			case KEY_D:
 				camera.keys.right = true;
 				break;
 			}
@@ -1102,16 +1069,16 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 		{
 			switch (wParam)
 			{
-			case 0x57:
+			case KEY_W:
 				camera.keys.up = false;
 				break;
-			case 0x53:
+			case KEY_S:
 				camera.keys.down = false;
 				break;
-			case 0x41:
+			case KEY_A:
 				camera.keys.left = false;
 				break;
-			case 0x44:
+			case KEY_D:
 				camera.keys.right = false;
 				break;
 			}
@@ -1128,7 +1095,7 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 		short wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
 		zoom += (float)wheelDelta * 0.005f * zoomSpeed;
 		camera.translate(glm::vec3(0.0f, 0.0f, (float)wheelDelta * 0.005f * zoomSpeed));
-		viewChanged();
+		viewUpdated = true;
 		break;
 	}
 	case WM_MOUSEMOVE:
@@ -1139,7 +1106,7 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 			zoom += (mousePos.y - (float)posy) * .005f * zoomSpeed;
 			camera.translate(glm::vec3(-0.0f, 0.0f, (mousePos.y - (float)posy) * .005f * zoomSpeed));
 			mousePos = glm::vec2((float)posx, (float)posy);
-			viewChanged();
+			viewUpdated = true;
 		}
 		if (wParam & MK_LBUTTON)
 		{
@@ -1147,9 +1114,9 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 			int32_t posy = HIWORD(lParam);
 			rotation.x += (mousePos.y - (float)posy) * 1.25f * rotationSpeed;
 			rotation.y -= (mousePos.x - (float)posx) * 1.25f * rotationSpeed;
-			camera.rotate(glm::vec3((mousePos.y - (float)posy), -(mousePos.x - (float)posx), 0.0f));
+			camera.rotate(glm::vec3((mousePos.y - (float)posy) * camera.rotationSpeed, -(mousePos.x - (float)posx) * camera.rotationSpeed, 0.0f));
 			mousePos = glm::vec2((float)posx, (float)posy);
-			viewChanged();
+			viewUpdated = true;
 		}
 		if (wParam & MK_MBUTTON)
 		{
@@ -1158,7 +1125,7 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 			cameraPos.x -= (mousePos.x - (float)posx) * 0.01f;
 			cameraPos.y -= (mousePos.y - (float)posy) * 0.01f;
 			camera.translate(glm::vec3(-(mousePos.x - (float)posx) * 0.01f, -(mousePos.y - (float)posy) * 0.01f, 0.0f));
-			viewChanged();
+			viewUpdated = true;
 			mousePos.x = (float)posx;
 			mousePos.y = (float)posy;
 		}
@@ -1166,26 +1133,26 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 	case WM_SIZE:
 		if ((prepared) && (wParam != SIZE_MINIMIZED))
 		{
-			destWidth = LOWORD(lParam);
-			destHeight = HIWORD(lParam);
-			if ((wParam == SIZE_MAXIMIZED) || (wParam == SIZE_MINIMIZED))
+			if ((resizing) || ((wParam == SIZE_MAXIMIZED) || (wParam == SIZE_RESTORED)))
 			{
+				destWidth = LOWORD(lParam);
+				destHeight = HIWORD(lParam);
 				windowResize();
 			}
 		}
 		break;
+	case WM_ENTERSIZEMOVE:
+		resizing = true;
+		break;
 	case WM_EXITSIZEMOVE:
-		if ((prepared) && ((destWidth != width) || (destHeight != height)))
-		{
-			windowResize();
-		}
+		resizing = false;
 		break;
 	}
 }
 #elif defined(__ANDROID__)
 int32_t VulkanExampleBase::handleAppInput(struct android_app* app, AInputEvent* event)
 {
-	VulkanExampleBase* vulkanExample = (VulkanExampleBase*)app->userData;
+	VulkanExampleBase* vulkanExample = reinterpret_cast<VulkanExampleBase*>(app->userData);
 	if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION)
 	{
 		if (AInputEvent_getSource(event) == AINPUT_SOURCE_JOYSTICK)
@@ -1234,7 +1201,7 @@ int32_t VulkanExampleBase::handleAppInput(struct android_app* app, AInputEvent* 
 			vulkanExample->keyPressed(GAMEPAD_BUTTON_R1);
 			break;
 		case AKEYCODE_BUTTON_START:
-			vulkanExample->keyPressed(GAMEPAD_BUTTON_START);
+			vulkanExample->paused = !vulkanExample->paused;
 			break;
 		};
 
@@ -1247,7 +1214,7 @@ int32_t VulkanExampleBase::handleAppInput(struct android_app* app, AInputEvent* 
 void VulkanExampleBase::handleAppCommand(android_app * app, int32_t cmd)
 {
 	assert(app->userData != NULL);
-	VulkanExampleBase* vulkanExample = (VulkanExampleBase*)app->userData;
+	VulkanExampleBase* vulkanExample = reinterpret_cast<VulkanExampleBase*>(app->userData);
 	switch (cmd)
 	{
 	case APP_CMD_SAVE_STATE:
@@ -1280,8 +1247,14 @@ void VulkanExampleBase::handleAppCommand(android_app * app, int32_t cmd)
 		LOGD("APP_CMD_GAINED_FOCUS");
 		vulkanExample->focused = true;
 		break;
+	case APP_CMD_TERM_WINDOW:
+		// Window is hidden or closed, clean up resources
+		LOGD("APP_CMD_TERM_WINDOW");
+		vulkanExample->swapChain.cleanup();
+		break;
 	}
 }
+#elif defined(_DIRECT2DISPLAY)
 #elif defined(__linux__)
 // Set up a window using XCB and request event types
 xcb_window_t VulkanExampleBase::setupWindow()
@@ -1294,6 +1267,7 @@ xcb_window_t VulkanExampleBase::setupWindow()
 	value_list[0] = screen->black_pixel;
 	value_list[1] =
 		XCB_EVENT_MASK_KEY_RELEASE |
+		XCB_EVENT_MASK_KEY_PRESS |
 		XCB_EVENT_MASK_EXPOSURE |
 		XCB_EVENT_MASK_STRUCTURE_NOTIFY |
 		XCB_EVENT_MASK_POINTER_MOTION |
@@ -1369,18 +1343,21 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 		{
 			rotation.x += (mousePos.y - (float)motion->event_y) * 1.25f;
 			rotation.y -= (mousePos.x - (float)motion->event_x) * 1.25f;
-			viewChanged();
+			camera.rotate(glm::vec3((mousePos.y - (float)motion->event_y) * camera.rotationSpeed, -(mousePos.x - (float)motion->event_x) * camera.rotationSpeed, 0.0f));
+			viewUpdated = true;
 		}
 		if (mouseButtons.right)
 		{
 			zoom += (mousePos.y - (float)motion->event_y) * .005f;
-			viewChanged();
+			camera.translate(glm::vec3(-0.0f, 0.0f, (mousePos.y - (float)motion->event_y) * .005f * zoomSpeed));
+			viewUpdated = true;
 		}
 		if (mouseButtons.middle)
 		{
 			cameraPos.x -= (mousePos.x - (float)motion->event_x) * 0.01f;
 			cameraPos.y -= (mousePos.y - (float)motion->event_y) * 0.01f;
-			viewChanged();
+			camera.translate(glm::vec3(-(mousePos.x - (float)(float)motion->event_x) * 0.01f, -(mousePos.y - (float)motion->event_y) * 0.01f, 0.0f));
+			viewUpdated = true;
 			mousePos.x = (float)motion->event_x;
 			mousePos.y = (float)motion->event_y;
 		}
@@ -1409,11 +1386,56 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 			mouseButtons.right = false;
 	}
 	break;
+	case XCB_KEY_PRESS:
+	{
+		const xcb_key_release_event_t *keyEvent = (const xcb_key_release_event_t *)event;
+		switch (keyEvent->detail)
+		{
+			case KEY_W:
+				camera.keys.up = true;
+				break;
+			case KEY_S:
+				camera.keys.down = true;
+				break;
+			case KEY_A:
+				camera.keys.left = true;
+				break;
+			case KEY_D:
+				camera.keys.right = true;
+				break;
+			case KEY_P:
+				paused = !paused;
+				break;
+			case KEY_F1:
+				if (enableTextOverlay)
+				{
+					textOverlay->visible = !textOverlay->visible;
+				}
+				break;				
+		}
+	}
+	break;	
 	case XCB_KEY_RELEASE:
 	{
 		const xcb_key_release_event_t *keyEvent = (const xcb_key_release_event_t *)event;
-		if (keyEvent->detail == 0x9)
-			quit = true;
+		switch (keyEvent->detail)
+		{
+			case KEY_W:
+				camera.keys.up = false;
+				break;
+			case KEY_S:
+				camera.keys.down = false;
+				break;
+			case KEY_A:
+				camera.keys.left = false;
+				break;
+			case KEY_D:
+				camera.keys.right = false;
+				break;			
+			case KEY_ESCAPE:
+				quit = true;
+				break;
+		}
 		keyPressed(keyEvent->detail);
 	}
 	break;
@@ -1453,107 +1475,6 @@ void VulkanExampleBase::keyPressed(uint32_t keyCode)
 void VulkanExampleBase::buildCommandBuffers()
 {
 	// Can be overriden in derived class
-}
-
-void VulkanExampleBase::buildPresentCommandBuffers()
-{
-	VkCommandBufferBeginInfo cmdBufInfo = vkTools::initializers::commandBufferBeginInfo();
-
-	for (uint32_t i = 0; i < swapChain.imageCount; i++)
-	{
-		// Command buffer for post present barrier
-
-		// Insert a post present image barrier to transform the image back to a
-		// color attachment that our render pass can write to
-		// We always use undefined image layout as the source as it doesn't actually matter
-		// what is done with the previous image contents
-
-		VK_CHECK_RESULT(vkBeginCommandBuffer(postPresentCmdBuffers[i], &cmdBufInfo));
-
-		VkImageMemoryBarrier postPresentBarrier = vkTools::initializers::imageMemoryBarrier();
-		postPresentBarrier.srcAccessMask = 0;
-		postPresentBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		postPresentBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		postPresentBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		postPresentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		postPresentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		postPresentBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-		postPresentBarrier.image = swapChain.buffers[i].image;
-
-		vkCmdPipelineBarrier(
-			postPresentCmdBuffers[i],
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			0,
-			0, nullptr,
-			0, nullptr,
-			1, &postPresentBarrier);
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(postPresentCmdBuffers[i]));
-
-		// Command buffers for pre present barrier
-
-		// Submit a pre present image barrier to the queue
-		// Transforms the (framebuffer) image layout from color attachment to present(khr) for presenting to the swap chain
-
-		VK_CHECK_RESULT(vkBeginCommandBuffer(prePresentCmdBuffers[i], &cmdBufInfo));
-
-		VkImageMemoryBarrier prePresentBarrier = vkTools::initializers::imageMemoryBarrier();
-		prePresentBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		prePresentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-		prePresentBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		prePresentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		prePresentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		prePresentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		prePresentBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-		prePresentBarrier.image = swapChain.buffers[i].image;
-
-		vkCmdPipelineBarrier(
-			prePresentCmdBuffers[i],
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			VK_FLAGS_NONE,
-			0, nullptr, // No memory barriers,
-			0, nullptr, // No buffer barriers,
-			1, &prePresentBarrier);
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(prePresentCmdBuffers[i]));
-	}
-}
-
-VkBool32 VulkanExampleBase::getMemoryType(uint32_t typeBits, VkFlags properties, uint32_t * typeIndex)
-{
-	for (uint32_t i = 0; i < 32; i++)
-	{
-		if ((typeBits & 1) == 1)
-		{
-			if ((deviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)
-			{
-				*typeIndex = i;
-				return true;
-			}
-		}
-		typeBits >>= 1;
-	}
-	return false;
-}
-
-uint32_t VulkanExampleBase::getMemoryType(uint32_t typeBits, VkFlags properties)
-{
-	for (uint32_t i = 0; i < 32; i++)
-	{
-		if ((typeBits & 1) == 1)
-		{
-			if ((deviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)
-			{
-				return i;
-			}
-		}
-		typeBits >>= 1;
-	}
-
-	// todo : throw error
-	return 0;
 }
 
 void VulkanExampleBase::createCommandPool()
@@ -1604,16 +1525,9 @@ void VulkanExampleBase::setupDepthStencil()
 	VK_CHECK_RESULT(vkCreateImage(device, &image, nullptr, &depthStencil.image));
 	vkGetImageMemoryRequirements(device, depthStencil.image, &memReqs);
 	mem_alloc.allocationSize = memReqs.size;
-	mem_alloc.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	mem_alloc.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	VK_CHECK_RESULT(vkAllocateMemory(device, &mem_alloc, nullptr, &depthStencil.mem));
-	
 	VK_CHECK_RESULT(vkBindImageMemory(device, depthStencil.image, depthStencil.mem, 0));
-	vkTools::setImageLayout(
-		setupCmdBuffer,
-		depthStencil.image,
-		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
-		VK_IMAGE_LAYOUT_UNDEFINED,
-		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
 	depthStencilView.image = depthStencil.image;
 	VK_CHECK_RESULT(vkCreateImageView(device, &depthStencilView, nullptr, &depthStencil.view));
@@ -1647,8 +1561,7 @@ void VulkanExampleBase::setupFrameBuffer()
 
 void VulkanExampleBase::setupRenderPass()
 {
-	VkAttachmentDescription attachments[2] = {};
-
+	std::array<VkAttachmentDescription, 2> attachments = {};
 	// Color attachment
 	attachments[0].format = colorformat;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1656,9 +1569,8 @@ void VulkanExampleBase::setupRenderPass()
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
+	attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	// Depth attachment
 	attachments[1].format = depthFormat;
 	attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1666,7 +1578,7 @@ void VulkanExampleBase::setupRenderPass()
 	attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 	VkAttachmentReference colorReference = {};
@@ -1677,27 +1589,44 @@ void VulkanExampleBase::setupRenderPass()
 	depthReference.attachment = 1;
 	depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-	VkSubpassDescription subpass = {};
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.flags = 0;
-	subpass.inputAttachmentCount = 0;
-	subpass.pInputAttachments = NULL;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorReference;
-	subpass.pResolveAttachments = NULL;
-	subpass.pDepthStencilAttachment = &depthReference;
-	subpass.preserveAttachmentCount = 0;
-	subpass.pPreserveAttachments = NULL;
+	VkSubpassDescription subpassDescription = {};
+	subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpassDescription.colorAttachmentCount = 1;
+	subpassDescription.pColorAttachments = &colorReference;
+	subpassDescription.pDepthStencilAttachment = &depthReference;
+	subpassDescription.inputAttachmentCount = 0;
+	subpassDescription.pInputAttachments = nullptr;
+	subpassDescription.preserveAttachmentCount = 0;
+	subpassDescription.pPreserveAttachments = nullptr;
+	subpassDescription.pResolveAttachments = nullptr;
+
+	// Subpass dependencies for layout transitions
+	std::array<VkSubpassDependency, 2> dependencies;
+
+	dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[0].dstSubpass = 0;
+	dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+	dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+	dependencies[1].srcSubpass = 0;
+	dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+	dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
 	VkRenderPassCreateInfo renderPassInfo = {};
 	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassInfo.pNext = NULL;
-	renderPassInfo.attachmentCount = 2;
-	renderPassInfo.pAttachments = attachments;
+	renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+	renderPassInfo.pAttachments = attachments.data();
 	renderPassInfo.subpassCount = 1;
-	renderPassInfo.pSubpasses = &subpass;
-	renderPassInfo.dependencyCount = 0;
-	renderPassInfo.pDependencies = NULL;
+	renderPassInfo.pSubpasses = &subpassDescription;
+	renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
+	renderPassInfo.pDependencies = dependencies.data();
 
 	VK_CHECK_RESULT(vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass));
 }
@@ -1736,7 +1665,6 @@ void VulkanExampleBase::windowResize()
 	destroyCommandBuffers();
 	createCommandBuffers();
 	buildCommandBuffers();
-	buildPresentCommandBuffers();
 
 	vkQueueWaitIdle(queue);
 	vkDeviceWaitIdle(device);
@@ -1767,6 +1695,8 @@ void VulkanExampleBase::initSwapchain()
 	swapChain.initSurface(windowInstance, window);
 #elif defined(__ANDROID__)	
 	swapChain.initSurface(androidApp->window);
+#elif defined(_DIRECT2DISPLAY)
+	swapChain.initSurface(width, height);
 #elif defined(__linux__)
 	swapChain.initSurface(connection, window);
 #endif
@@ -1774,5 +1704,5 @@ void VulkanExampleBase::initSwapchain()
 
 void VulkanExampleBase::setupSwapChain()
 {
-	swapChain.create(setupCmdBuffer, &width, &height, enableVSync);
+	swapChain.create(&width, &height, enableVSync);
 }

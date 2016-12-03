@@ -62,13 +62,6 @@ public:
 		bool down = false;
 	} keys;
 
-	// Output camera position and rotation into an stream
-	friend std::ostream & operator << (std::ostream &os, const Camera &cam)
-	{
-		os << std::fixed << std::setprecision(2) << "pos: " << cam.position.x << " " << cam.position.y << " " << cam.position.z << " rot: " << cam.rotation.x << "  " << cam.rotation.y << " " << cam.rotation.z;
-		return os;
-	}
-
 	bool moving()
 	{
 		return keys.left || keys.right || keys.up || keys.down;
@@ -160,8 +153,8 @@ public:
 			camFront = glm::normalize(camFront);
 
 			float moveSpeed = deltaTime * movementSpeed * 2.0f;
-			float rotSpeed = deltaTime * 50.0f;
-
+			float rotSpeed = deltaTime * rotationSpeed * 50.0f;
+			 
 			// Move
 			if (fabsf(axisLeft.y) > deadZone)
 			{

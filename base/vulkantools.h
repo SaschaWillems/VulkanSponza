@@ -145,7 +145,7 @@ namespace vkTools
 		VkFramebufferCreateInfo framebufferCreateInfo();
 
 		VkSemaphoreCreateInfo semaphoreCreateInfo();
-		VkFenceCreateInfo fenceCreateInfo(VkFenceCreateFlags flags);
+		VkFenceCreateInfo fenceCreateInfo(VkFenceCreateFlags flags = VK_FLAGS_NONE);
 		VkEventCreateInfo eventCreateInfo();
 
 		VkSubmitInfo submitInfo();
@@ -180,7 +180,8 @@ namespace vkTools
 		VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
 			VkDescriptorType type, 
 			VkShaderStageFlags stageFlags, 
-			uint32_t binding);
+			uint32_t binding,
+			uint32_t count = 1);
 
 		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo(
 			const VkDescriptorSetLayoutBinding* pBindings,
@@ -188,7 +189,9 @@ namespace vkTools
 
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo(
 			const VkDescriptorSetLayout* pSetLayouts,
-			uint32_t setLayoutCount	);
+			uint32_t setLayoutCount);
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo(
+			uint32_t setLayoutCount = 1);
 
 		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo(
 			VkDescriptorPool descriptorPool,
@@ -279,6 +282,14 @@ namespace vkTools
 			VkShaderStageFlags stageFlags,
 			uint32_t size,
 			uint32_t offset);
+
+		VkBindSparseInfo bindSparseInfo();
+
+		/** @brief Initialize a map entry for a shader specialization constant */
+		VkSpecializationMapEntry specializationMapEntry(uint32_t constantID, uint32_t offset, size_t size);
+
+		/** @biref Initialize a specialization constant info structure to pass to a shader stage */
+		VkSpecializationInfo specializationInfo(uint32_t mapEntryCount, const VkSpecializationMapEntry* mapEntries, size_t dataSize, const void* data);
 	}
 
 }
