@@ -562,7 +562,7 @@ public:
 	};
 
 	struct {
-		Light lights[13];
+		Light lights[17];
 		glm::vec4 viewPos;
 	} uboFragmentLights;
 
@@ -597,10 +597,9 @@ public:
 	struct FrameBuffer {
 		int32_t width, height;
 		VkFramebuffer frameBuffer;
-		FrameBufferAttachment position, normal, albedo;
+		std::array<FrameBufferAttachment,3> attachments;
 		FrameBufferAttachment depth;
 		VkRenderPass renderPass;
-
 	} offScreenFrameBuf;
 
 	// One sampler for the frame buffer color attachments
@@ -632,7 +631,6 @@ public:
 		setupConsole("VulkanExample");
 #endif
 		srand(time(NULL));
-//		paused = true;
 	}
 
 	~VulkanExample()
@@ -642,20 +640,13 @@ public:
 
 		vkDestroySampler(device, colorSampler, nullptr);
 
-		// Frame buffer
-
-		// Color attachments
-		vkDestroyImageView(device, offScreenFrameBuf.position.view, nullptr);
-		vkDestroyImage(device, offScreenFrameBuf.position.image, nullptr);
-		vkFreeMemory(device, offScreenFrameBuf.position.mem, nullptr);
-
-		vkDestroyImageView(device, offScreenFrameBuf.normal.view, nullptr);
-		vkDestroyImage(device, offScreenFrameBuf.normal.image, nullptr);
-		vkFreeMemory(device, offScreenFrameBuf.normal.mem, nullptr);
-
-		vkDestroyImageView(device, offScreenFrameBuf.albedo.view, nullptr);
-		vkDestroyImage(device, offScreenFrameBuf.albedo.image, nullptr);
-		vkFreeMemory(device, offScreenFrameBuf.albedo.mem, nullptr);
+		// Frame buffer attachments
+		for (auto attachment : offScreenFrameBuf.attachments)
+		{
+			vkDestroyImageView(device, attachment.view, nullptr);
+			vkDestroyImage(device, attachment.image, nullptr);
+			vkFreeMemory(device, attachment.mem, nullptr);
+		}
 
 		// Depth attachment
 		vkDestroyImageView(device, offScreenFrameBuf.depth.view, nullptr);
@@ -789,25 +780,25 @@ public:
 
 		// Color attachments
 
-		// (World space) Positions
+		// Attachment 0: World space positions
+		createAttachment(
+			VK_FORMAT_R32G32B32A32_SFLOAT,
+			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			&offScreenFrameBuf.attachments[0],
+			layoutCmd);
+
+		// Attachment 1: World space normal
 		createAttachment(
 			VK_FORMAT_R16G16B16A16_SFLOAT,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-			&offScreenFrameBuf.position,
+			&offScreenFrameBuf.attachments[1],
 			layoutCmd);
 
-		// (World space) Normals
+		// Attachment 1: Packed colors, specular
 		createAttachment(
-			VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_FORMAT_R32G32B32A32_UINT,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-			&offScreenFrameBuf.normal,
-			layoutCmd);
-
-		// Albedo (color)
-		createAttachment(
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-			&offScreenFrameBuf.albedo,
+			&offScreenFrameBuf.attachments[2],
 			layoutCmd);
 
 		// Depth attachment
@@ -851,9 +842,9 @@ public:
 		}
 
 		// Formats
-		attachmentDescs[0].format = offScreenFrameBuf.position.format;
-		attachmentDescs[1].format = offScreenFrameBuf.normal.format;
-		attachmentDescs[2].format = offScreenFrameBuf.albedo.format;
+		attachmentDescs[0].format = offScreenFrameBuf.attachments[0].format;
+		attachmentDescs[1].format = offScreenFrameBuf.attachments[1].format;
+		attachmentDescs[2].format = offScreenFrameBuf.attachments[2].format;
 		attachmentDescs[3].format = offScreenFrameBuf.depth.format;
 
 		std::vector<VkAttachmentReference> colorReferences;
@@ -881,9 +872,9 @@ public:
 		VK_CHECK_RESULT(vkCreateRenderPass(device, &renderPassInfo, nullptr, &offScreenFrameBuf.renderPass));
 
 		std::array<VkImageView, 4> attachments;
-		attachments[0] = offScreenFrameBuf.position.view;
-		attachments[1] = offScreenFrameBuf.normal.view;
-		attachments[2] = offScreenFrameBuf.albedo.view;
+		attachments[0] = offScreenFrameBuf.attachments[0].view;
+		attachments[1] = offScreenFrameBuf.attachments[1].view;
+		attachments[2] = offScreenFrameBuf.attachments[2].view;
 		// depth
 		attachments[3] = offScreenFrameBuf.depth.view;
 
@@ -946,10 +937,8 @@ public:
 
 		VK_CHECK_RESULT(vkBeginCommandBuffer(offScreenCmdBuffer, &cmdBufInfo));
 
-		std::vector<FrameBufferAttachment> attachments = { offScreenFrameBuf.position, offScreenFrameBuf.normal, offScreenFrameBuf.albedo };
-
 		// Change back layout of the color attachments after sampling in the fragment shader
-		for (auto attachment : attachments)
+		for (auto attachment : offScreenFrameBuf.attachments)
 		{
 			vkTools::setImageLayout(
 				offScreenCmdBuffer,
@@ -1009,7 +998,7 @@ public:
 		vkCmdEndRenderPass(offScreenCmdBuffer);
 
 		// Change back layout of the color attachments after sampling in the fragment shader
-		for (auto attachment : attachments)
+		for (auto attachment : offScreenFrameBuf.attachments)
 		{
 			vkTools::setImageLayout(
 				offScreenCmdBuffer,
@@ -1332,19 +1321,19 @@ public:
 		VkDescriptorImageInfo texDescriptorPosition =
 			vkTools::initializers::descriptorImageInfo(
 				colorSampler,
-				offScreenFrameBuf.position.view,
+				offScreenFrameBuf.attachments[0].view,
 				VK_IMAGE_LAYOUT_GENERAL);
 
 		VkDescriptorImageInfo texDescriptorNormal =
 			vkTools::initializers::descriptorImageInfo(
 				colorSampler,
-				offScreenFrameBuf.normal.view,
+				offScreenFrameBuf.attachments[1].view,
 				VK_IMAGE_LAYOUT_GENERAL);
 
 		VkDescriptorImageInfo texDescriptorAlbedo =
 			vkTools::initializers::descriptorImageInfo(
 				colorSampler,
-				offScreenFrameBuf.albedo.view,
+				offScreenFrameBuf.attachments[2].view,
 				VK_IMAGE_LAYOUT_GENERAL);
 
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets =
@@ -1674,6 +1663,13 @@ public:
 
 		setupLight(&uboFragmentLights.lights[11], { -110.0f, 20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
 		setupLight(&uboFragmentLights.lights[12], { -110.0f, 20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+
+		// Lion eyes
+		setupLight(&uboFragmentLights.lights[13], { -122.0f, 18.0f, -3.2f }, { 1.0f, 0.3f, 0.3f }, 25.0f);
+		setupLight(&uboFragmentLights.lights[14], { -122.0f, 18.0f,  3.2f }, { 0.3f, 1.0f, 0.3f }, 25.0f);
+
+		setupLight(&uboFragmentLights.lights[15], { 135.0f, 18.0f, -3.2f }, { 0.3f, 0.3f, 1.0f }, 25.0f);
+		setupLight(&uboFragmentLights.lights[16], { 135.0f, 18.0f,  3.2f }, { 1.0f, 1.0f, 0.3f }, 25.0f);
 	}
 
 	// Update fragment shader light positions for moving light sources
@@ -1823,9 +1819,6 @@ public:
 #else
 		textOverlay->addText("Press \"1\" to toggle render targets", 5.0f, 85.0f, VulkanTextOverlay::alignLeft);
 #endif
-		std::stringstream ss;
-		ss << camera;
-		textOverlay->addText(ss.str(), 5.0, 105.0f, VulkanTextOverlay::alignLeft);
 		// Render targets
 		if (debugDisplay)
 		{
