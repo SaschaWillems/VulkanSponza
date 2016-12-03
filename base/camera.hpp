@@ -15,9 +15,6 @@
 class Camera
 {
 private:
-	float fov;
-	float znear, zfar;
-
 	void updateViewMatrix()
 	{
 		glm::mat4 rotM = glm::mat4();
@@ -41,6 +38,9 @@ private:
 public:
 	enum CameraType { lookat, firstperson };
 	CameraType type = CameraType::lookat;
+
+	float fov;
+	float znear, zfar;
 
 	glm::vec3 rotation = glm::vec3();
 	glm::vec3 position = glm::vec3();

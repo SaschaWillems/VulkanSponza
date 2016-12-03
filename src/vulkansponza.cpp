@@ -1443,8 +1443,28 @@ public:
 
 		// Offscreen pipelines
 
+		// Set constant parameters via specialization constants
+		struct SpecializationData {
+			float znear;
+			float zfar;
+			int32_t discard = 0;
+		} specializationData;
+
+		specializationData.znear = camera.znear;
+		specializationData.zfar = camera.zfar;
+
+		std::vector<VkSpecializationMapEntry> specializationMapEntries;
+		specializationMapEntries = {
+			vkTools::initializers::specializationMapEntry(0, offsetof(SpecializationData, znear), sizeof(float)),
+			vkTools::initializers::specializationMapEntry(1, offsetof(SpecializationData, zfar), sizeof(float)),
+			vkTools::initializers::specializationMapEntry(2, offsetof(SpecializationData, discard), sizeof(int32_t)),
+
+		};
+		VkSpecializationInfo specializationInfo = vkTools::initializers::specializationInfo(specializationMapEntries.size(), specializationMapEntries.data(), sizeof(specializationData), &specializationData);
+
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/mrt.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		shaderStages[1].pSpecializationInfo = &specializationInfo;
 
 		// Separate render pass
 		pipelineCreateInfo.renderPass = offScreenFrameBuf.renderPass;
@@ -1465,31 +1485,11 @@ public:
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.solid));
 
-		//// Bump
-		//shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt_bump.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-		//VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.bump));
-
-		// Alpha blending (no depth writes)
-
-		//rasterAMD.rasterizationOrder = VK_RASTERIZATION_ORDER_STRICT_AMD;
-
-
-		shaderStages[1] = loadShader(getAssetPath() + "shaders/mrt_discard.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
+		// Transparent objects (discard by alpha)
 		depthStencilState.depthWriteEnable = VK_FALSE;
 		rasterizationState.cullMode = VK_CULL_MODE_NONE;
 
-		for (uint32_t i = 0; i < blendAttachmentStates.size(); i++)
-		{
-			blendAttachmentStates[i].blendEnable = VK_TRUE;
-			blendAttachmentStates[i].colorBlendOp = VK_BLEND_OP_ADD;
-			blendAttachmentStates[i].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-			blendAttachmentStates[i].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-			blendAttachmentStates[i].alphaBlendOp = VK_BLEND_OP_ADD;
-			blendAttachmentStates[i].srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-			blendAttachmentStates[i].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		}
+		specializationData.discard = 1;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.blend));
 

@@ -17,20 +17,43 @@ layout (location = 0) out vec4 outPosition;
 layout (location = 1) out vec4 outNormal;
 layout (location = 2) out uvec4 outAlbedo;
 
+layout (constant_id = 0) const float NEAR_PLANE = 0.1f;
+layout (constant_id = 1) const float FAR_PLANE = 64.0f;
+layout (constant_id = 2) const int ENABLE_DISCARD = 0;
+
+float linearDepth(float depth)
+{
+	float z = depth * 2.0f - 1.0f; 
+	return (2.0f * NEAR_PLANE * FAR_PLANE) / (FAR_PLANE + NEAR_PLANE - z * (FAR_PLANE - NEAR_PLANE));	
+}
+
 void main() 
 {
-	outPosition = vec4(inWorldPos, 1.0);
+	outPosition = vec4(inWorldPos, linearDepth(gl_FragCoord.z));
 
-	vec3 N = normalize(inNormal);
-	vec3 T = normalize(inTangent);
-	vec3 B = cross(N, T);
-	mat3 TBN = mat3(T, B, N);
-	vec3 nm = texture(samplerNormal, inUV).xyz * 2.0 - vec3(1.0);
-	nm = TBN * normalize(nm);
-	outNormal = vec4(nm, 0.0);
+	vec4 color = texture(samplerColor, inUV);
+
+	// Discard by alpha for transparent objects if enabled via specialization constant
+	if (ENABLE_DISCARD == 0)
+	{
+		vec3 N = normalize(inNormal);
+		vec3 T = normalize(inTangent);
+		vec3 B = cross(N, T);
+		mat3 TBN = mat3(T, B, N);
+		vec3 nm = texture(samplerNormal, inUV).xyz * 2.0 - vec3(1.0);
+		nm = TBN * normalize(nm);
+		outNormal = vec4(nm, 0.0);
+	}
+	else
+	{
+		outNormal = vec4(inNormal, 0.0);
+		if (color.a < 0.5)
+		{
+			discard;
+		}
+	}
 
 	// Pack
-	vec4 color = texture(samplerColor, inUV);
 	float specular = texture(samplerSpecular, inUV).r;
 
 	outAlbedo.r = packHalf2x16(color.rg);
