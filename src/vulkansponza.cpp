@@ -54,6 +54,7 @@ struct Vertex
 
 struct {
 	VkPipeline composition;
+	VkPipeline compositionNoSSAO;
 	VkPipeline debug;
 	struct {
 		VkPipeline solid; // todo : rename
@@ -537,6 +538,7 @@ public:
 
 	bool debugDisplay = false;
 	bool attachLight = false;
+	bool enableSSAO = true;
 
 	struct {
 		vkTools::VulkanTexture colorMap;
@@ -705,6 +707,8 @@ public:
 		vkDestroyFramebuffer(device, frameBuffers.offscreen.frameBuffer, nullptr);
 
 		vkDestroyPipeline(device, pipelines.composition, nullptr);
+		vkDestroyPipeline(device, pipelines.compositionNoSSAO, nullptr);
+
 		vkDestroyPipeline(device, pipelines.scene.solid, nullptr);
 		//vkDestroyPipeline(device, pipelines.scene.bump, nullptr);
 		vkDestroyPipeline(device, pipelines.scene.blend, nullptr);
@@ -1055,10 +1059,15 @@ public:
 
 	// Build command buffer for rendering the scene to the offscreen frame buffer 
 	// and blitting it to the different texture targets
-	void buildDeferredCommandBuffer()
+	void buildDeferredCommandBuffer(bool rebuild = false)
 	{
-		if (offScreenCmdBuffer == VK_NULL_HANDLE)
+
+		if ((offScreenCmdBuffer == VK_NULL_HANDLE) || (rebuild))
 		{
+			if (rebuild)
+			{
+				vkFreeCommandBuffers(device, cmdPool, 1, &offScreenCmdBuffer);
+			}
 			offScreenCmdBuffer = VulkanExampleBase::createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
 		}
 
@@ -1137,52 +1146,56 @@ public:
 
 		vkCmdEndRenderPass(offScreenCmdBuffer);
 
-		// Second pass: SSAO generation
-		// -------------------------------------------------------------------------------------------------------
+		if (enableSSAO)
+		{
 
-		clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
-		clearValues[1].depthStencil = { 1.0f, 0 };
+			// Second pass: SSAO generation
+			// -------------------------------------------------------------------------------------------------------
 
-		renderPassBeginInfo.framebuffer = frameBuffers.ssao.frameBuffer;
-		renderPassBeginInfo.renderPass = frameBuffers.ssao.renderPass;
-		renderPassBeginInfo.renderArea.extent.width = frameBuffers.ssao.width;
-		renderPassBeginInfo.renderArea.extent.height = frameBuffers.ssao.height;
-		renderPassBeginInfo.clearValueCount = 2;
-		renderPassBeginInfo.pClearValues = clearValues.data();
+			clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+			clearValues[1].depthStencil = { 1.0f, 0 };
 
-		vkCmdBeginRenderPass(offScreenCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+			renderPassBeginInfo.framebuffer = frameBuffers.ssao.frameBuffer;
+			renderPassBeginInfo.renderPass = frameBuffers.ssao.renderPass;
+			renderPassBeginInfo.renderArea.extent.width = frameBuffers.ssao.width;
+			renderPassBeginInfo.renderArea.extent.height = frameBuffers.ssao.height;
+			renderPassBeginInfo.clearValueCount = 2;
+			renderPassBeginInfo.pClearValues = clearValues.data();
 
-		viewport = vkTools::initializers::viewport((float)frameBuffers.ssao.width, (float)frameBuffers.ssao.height, 0.0f, 1.0f);
-		vkCmdSetViewport(offScreenCmdBuffer, 0, 1, &viewport);
-		scissor = vkTools::initializers::rect2D(frameBuffers.ssao.width, frameBuffers.ssao.height, 0, 0);
-		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
+			vkCmdBeginRenderPass(offScreenCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssao, 0, 1, &descriptorSets.ssao, 0, NULL);
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.ssao);
-		vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
+			viewport = vkTools::initializers::viewport((float)frameBuffers.ssao.width, (float)frameBuffers.ssao.height, 0.0f, 1.0f);
+			vkCmdSetViewport(offScreenCmdBuffer, 0, 1, &viewport);
+			scissor = vkTools::initializers::rect2D(frameBuffers.ssao.width, frameBuffers.ssao.height, 0, 0);
+			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdEndRenderPass(offScreenCmdBuffer);
+			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssao, 0, 1, &descriptorSets.ssao, 0, NULL);
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.ssao);
+			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
-		// Third pass: SSAO blur
-		// -------------------------------------------------------------------------------------------------------
+			vkCmdEndRenderPass(offScreenCmdBuffer);
 
-		renderPassBeginInfo.framebuffer = frameBuffers.ssaoBlur.frameBuffer;
-		renderPassBeginInfo.renderPass = frameBuffers.ssaoBlur.renderPass;
-		renderPassBeginInfo.renderArea.extent.width = frameBuffers.ssaoBlur.width;
-		renderPassBeginInfo.renderArea.extent.height = frameBuffers.ssaoBlur.height;
+			// Third pass: SSAO blur
+			// -------------------------------------------------------------------------------------------------------
 
-		vkCmdBeginRenderPass(offScreenCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+			renderPassBeginInfo.framebuffer = frameBuffers.ssaoBlur.frameBuffer;
+			renderPassBeginInfo.renderPass = frameBuffers.ssaoBlur.renderPass;
+			renderPassBeginInfo.renderArea.extent.width = frameBuffers.ssaoBlur.width;
+			renderPassBeginInfo.renderArea.extent.height = frameBuffers.ssaoBlur.height;
 
-		viewport = vkTools::initializers::viewport((float)frameBuffers.ssaoBlur.width, (float)frameBuffers.ssaoBlur.height, 0.0f, 1.0f);
-		vkCmdSetViewport(offScreenCmdBuffer, 0, 1, &viewport);
-		scissor = vkTools::initializers::rect2D(frameBuffers.ssaoBlur.width, frameBuffers.ssaoBlur.height, 0, 0);
-		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
+			vkCmdBeginRenderPass(offScreenCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssaoBlur, 0, 1, &descriptorSets.ssaoBlur, 0, NULL);
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.ssaoBlur);
-		vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
+			viewport = vkTools::initializers::viewport((float)frameBuffers.ssaoBlur.width, (float)frameBuffers.ssaoBlur.height, 0.0f, 1.0f);
+			vkCmdSetViewport(offScreenCmdBuffer, 0, 1, &viewport);
+			scissor = vkTools::initializers::rect2D(frameBuffers.ssaoBlur.width, frameBuffers.ssaoBlur.height, 0, 0);
+			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdEndRenderPass(offScreenCmdBuffer);
+			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssaoBlur, 0, 1, &descriptorSets.ssaoBlur, 0, NULL);
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.ssaoBlur);
+			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
+
+			vkCmdEndRenderPass(offScreenCmdBuffer);
+		}
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(offScreenCmdBuffer));
 	}
@@ -1264,7 +1277,7 @@ public:
 			}
 
 			// Final composition as full screen quad
-			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.composition);
+			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, (enableSSAO) ? pipelines.composition : pipelines.compositionNoSSAO);
 			vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &meshes.quad.vertices.buf, offsets);
 			vkCmdBindIndexBuffer(drawCmdBuffers[i], meshes.quad.indices.buf, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(drawCmdBuffers[i], 6, 1, 0, 0, 1);
@@ -1586,12 +1599,30 @@ public:
 		*/
 
 		// Final composition pipeline
-		pipelineCreateInfo.layout = pipelineLayouts.composition;
-		pipelineCreateInfo.renderPass = renderPass;
+		{
+			pipelineCreateInfo.layout = pipelineLayouts.composition;
+			pipelineCreateInfo.renderPass = renderPass;
 
-		shaderStages[0] = loadShader(getAssetPath() + "shaders/composition.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = loadShader(getAssetPath() + "shaders/composition.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.composition));
+			shaderStages[0] = loadShader(getAssetPath() + "shaders/composition.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+			shaderStages[1] = loadShader(getAssetPath() + "shaders/composition.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+			struct SpecializationData {
+				int32_t enableSSAO = 1;
+			} specializationData;
+
+			std::vector<VkSpecializationMapEntry> specializationMapEntries;
+			specializationMapEntries = {
+				vkTools::initializers::specializationMapEntry(0, 0, sizeof(int32_t)),
+			};
+			VkSpecializationInfo specializationInfo = vkTools::initializers::specializationInfo(specializationMapEntries.size(), specializationMapEntries.data(), sizeof(specializationData), &specializationData);
+			shaderStages[1].pSpecializationInfo = &specializationInfo;
+
+			// SSAO enabled
+			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.composition));
+			// SSAO disabled
+			specializationData.enableSSAO = 0;
+			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.compositionNoSSAO));
+		}
 
 		// Derivate info for other pipelines
 		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
@@ -2000,6 +2031,13 @@ public:
 		updateUniformBuffersScreen();
 	}
 
+	void toggleSSAO()
+	{
+		enableSSAO = !enableSSAO;
+		reBuildCommandBuffers();
+		buildDeferredCommandBuffer(true);
+	}
+
 	virtual void keyPressed(uint32_t keyCode)
 	{
 		switch (keyCode)
@@ -2008,6 +2046,9 @@ public:
 		case GAMEPAD_BUTTON_A:
 			toggleDebugDisplay();
 			updateTextOverlay();
+			break;
+		case KEY_F2:
+			toggleSSAO();
 			break;
 		case KEY_L:
 		case GAMEPAD_BUTTON_B:
