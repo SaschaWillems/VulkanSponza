@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{fb1b5c63-d177-4a35-9ea0-6d5b91d8588e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\base\vulkandebug.cpp">
@@ -44,5 +47,34 @@
     <ClInclude Include="..\base\camera.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\shaders\debug.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\mrt.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\debug.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\mrt.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\ssao.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\blur.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\fullscreen.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\composition.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\composition.vert">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

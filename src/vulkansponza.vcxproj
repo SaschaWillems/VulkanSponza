@@ -23,6 +23,17 @@
     <ClInclude Include="..\base\vulkantextoverlay.hpp" />
     <ClInclude Include="..\base\vulkantools.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\shaders\blur.frag" />
+    <None Include="..\data\shaders\composition.frag" />
+    <None Include="..\data\shaders\composition.vert" />
+    <None Include="..\data\shaders\debug.frag" />
+    <None Include="..\data\shaders\debug.vert" />
+    <None Include="..\data\shaders\fullscreen.vert" />
+    <None Include="..\data\shaders\mrt.frag" />
+    <None Include="..\data\shaders\mrt.vert" />
+    <None Include="..\data\shaders\ssao.frag" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{9462DD15-5A1D-460A-B502-C9250D98D7A3}</ProjectGuid>
     <RootNamespace>vulkansponza</RootNamespace>

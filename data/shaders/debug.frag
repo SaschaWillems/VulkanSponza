@@ -18,6 +18,7 @@ void main()
 	components[1] = texture(samplerNormal, inUV.st).rgb;  
 	ivec2 texDim = textureSize(samplerAlbedo, 0);
 	uvec4 albedo = texelFetch(samplerAlbedo, ivec2(inUV.st * texDim ), 0);
+//	uvec4 albedo = texture(samplerAlbedo, inUV.st, 0);
 
 	vec4 color;
 	color.rg = unpackHalf2x16(albedo.r);
@@ -26,6 +27,7 @@ void main()
 	spec.rg = unpackHalf2x16(albedo.b);
 
 	components[2] = vec3(spec.r);
+	components[0] = color.rgb;
 
 	// Select component depending on z coordinate of quad
 	highp int index = int(inUV.z);

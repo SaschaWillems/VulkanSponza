@@ -42,11 +42,11 @@ void main()
 		mat3 TBN = mat3(T, B, N);
 		vec3 nm = texture(samplerNormal, inUV).xyz * 2.0 - vec3(1.0);
 		nm = TBN * normalize(nm);
-		outNormal = vec4(nm, 0.0);
+		outNormal = vec4(nm * 0.5 + 0.5, 0.0);
 	}
 	else
 	{
-		outNormal = vec4(inNormal, 0.0);
+		outNormal = vec4(normalize(inNormal) * 0.5 + 0.5, 0.0);
 		if (color.a < 0.5)
 		{
 			discard;

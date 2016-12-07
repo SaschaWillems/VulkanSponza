@@ -6,6 +6,9 @@
 layout (binding = 1) uniform sampler2D samplerposition;
 layout (binding = 2) uniform sampler2D samplerNormal;
 layout (binding = 3) uniform usampler2D samplerAlbedo;
+layout (binding = 4) uniform sampler2D samplerSSAO;
+
+layout (constant_id = 0) const int SSAO_ENABLED = 1;
 
 layout (location = 0) in vec2 inUV;
 
@@ -22,10 +25,12 @@ struct Light {
 
 #define NUM_LIGHTS 17
 
-layout (binding = 4) uniform UBO 
+layout (binding = 5) uniform UBO 
 {
 	Light lights[NUM_LIGHTS];
 	vec4 viewPos;
+	mat4 view;
+	mat4 model;
 } ubo;
 
 
@@ -33,10 +38,11 @@ void main()
 {
 	// Get G-Buffer values
 	vec3 fragPos = texture(samplerposition, inUV).rgb;
-	vec3 normal = texture(samplerNormal, inUV).rgb;
+	vec3 normal = texture(samplerNormal, inUV).rgb * 2.0 - 1.0;
 
 	// unpack
 	ivec2 texDim = textureSize(samplerAlbedo, 0);
+	//uvec4 albedo = texture(samplerAlbedo, inUV.st, 0);
 	uvec4 albedo = texelFetch(samplerAlbedo, ivec2(inUV.st * texDim ), 0);
 
 	vec4 color;
@@ -45,18 +51,20 @@ void main()
 	vec4 spec;
 	spec.rg = unpackHalf2x16(albedo.b);	
 
-	vec3 ambient = vec3(0.0);	
+	vec3 ambient = color.rgb * 0.1;	
 	vec3 fragcolor  = ambient;
 	
 	for(int i = 0; i < NUM_LIGHTS; ++i)
 	{
 		// Light to fragment
-		vec3 L = ubo.lights[i].position.xyz - fragPos;
+		vec3 lightPos = vec3(ubo.view * ubo.model * vec4(ubo.lights[i].position.xyz, 1.0));
+		vec3 L = lightPos - fragPos;
 		float dist = length(L);
 		L = normalize(L);
 
 		// Viewer to fragment
-		vec3 V = ubo.viewPos.xyz - fragPos;
+		vec3 viewPos = vec3(ubo.view * ubo.model * vec4(ubo.viewPos.xyz, 1.0));
+		vec3 V = viewPos - fragPos;
 		V = normalize(V);
 
 		// Attenuation
@@ -74,6 +82,12 @@ void main()
 
 		fragcolor += diff + spec;				
 	}    	
+
+	if (SSAO_ENABLED == 1)
+	{
+		float ao = texture(samplerSSAO, inUV).r;
+		fragcolor *= ao.rrr;
+	}
    
 	outFragcolor = vec4(fragcolor, 1.0);	
 }
