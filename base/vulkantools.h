@@ -270,9 +270,9 @@ namespace vkTools
 			uint32_t patchControlPoints);
 
 		VkGraphicsPipelineCreateInfo pipelineCreateInfo(
-			VkPipelineLayout layout,
-			VkRenderPass renderPass,
-			VkPipelineCreateFlags flags);
+			VkPipelineLayout layout = VK_NULL_HANDLE,
+			VkRenderPass renderPass = VK_NULL_HANDLE,
+			VkPipelineCreateFlags flags = 0);
 
 		VkComputePipelineCreateInfo computePipelineCreateInfo(
 			VkPipelineLayout layout,
