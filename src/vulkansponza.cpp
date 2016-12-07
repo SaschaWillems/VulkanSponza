@@ -540,6 +540,9 @@ public:
 	bool attachLight = false;
 	bool enableSSAO = true;
 
+	// Vendor specific
+	bool enableNVDedicatedAllocation = false;
+
 	struct {
 		vkTools::VulkanTexture colorMap;
 		vkTools::VulkanTexture ssaoNoise;
@@ -682,6 +685,8 @@ public:
 		setupConsole("VulkanExample");
 #endif
 		srand(time(NULL));
+
+		enableNVDedicatedAllocation = vulkanDevice->extensionSupported(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME);
 	}
 
 	~VulkanExample()
@@ -778,13 +783,27 @@ public:
 		image.tiling = VK_IMAGE_TILING_OPTIMAL;
 		image.usage = usage | VK_IMAGE_USAGE_SAMPLED_BIT;
 
+		if (enableNVDedicatedAllocation)
+		{
+			VkDedicatedAllocationImageCreateInfoNV dedicatedImageInfo { VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_IMAGE_CREATE_INFO_NV };
+			dedicatedImageInfo.dedicatedAllocation = VK_TRUE;
+			image.pNext = &dedicatedImageInfo;
+		}
+		VK_CHECK_RESULT(vkCreateImage(device, &image, nullptr, &attachment->image));
+
 		VkMemoryAllocateInfo memAlloc = vkTools::initializers::memoryAllocateInfo();
 		VkMemoryRequirements memReqs;
-
-		VK_CHECK_RESULT(vkCreateImage(device, &image, nullptr, &attachment->image));
 		vkGetImageMemoryRequirements(device, attachment->image, &memReqs);
 		memAlloc.allocationSize = memReqs.size;
 		memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+		if (enableNVDedicatedAllocation)
+		{
+			VkDedicatedAllocationMemoryAllocateInfoNV dedicatedAllocationInfo { VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_MEMORY_ALLOCATE_INFO_NV };
+			dedicatedAllocationInfo.image = attachment->image;
+			memAlloc.pNext = &dedicatedAllocationInfo;
+		}
+
 		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &attachment->mem));
 		VK_CHECK_RESULT(vkBindImageMemory(device, attachment->image, attachment->mem, 0));
 
@@ -1913,7 +1932,7 @@ public:
 		if (attachLight)
 		{
 			// Attach to camera position
-			uboFragmentLights.lights[0].position = glm::vec4(camera.position, 0.0f) * glm::vec4(-1.0f, 1.0f, -1.0f, 1.0f);
+			uboFragmentLights.lights[0].position = glm::vec4(camera.position, 0.0f) * glm::vec4(-1.0f, -1.0f, -1.0f, 1.0f);
 		}
 		else
 		{

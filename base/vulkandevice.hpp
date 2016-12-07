@@ -32,6 +32,8 @@ namespace vk
 		VkPhysicalDeviceMemoryProperties memoryProperties;
 		/** @brief Queue family properties of the physical device */
 		std::vector<VkQueueFamilyProperties> queueFamilyProperties;
+		/** @brief List of extensions supported by the device */
+		std::vector<std::string> supportedExtensions;
 
 		/** @brief Default command pool for the graphics queue family index */
 		VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -70,6 +72,21 @@ namespace vk
 			assert(queueFamilyCount > 0);
 			queueFamilyProperties.resize(queueFamilyCount);
 			vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
+
+			// Get list of supported extensions
+			uint32_t extCount;
+			vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, nullptr);
+			std::vector<VkExtensionProperties> extensions(extCount);
+			if (extCount > 0) 
+			{
+				if (vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, &extensions.front()) == VK_SUCCESS) 
+				{
+					for (auto ext : extensions)	
+					{
+						supportedExtensions.push_back(ext.extensionName);
+					}
+				}
+			}
 		}
 
 		/** 
@@ -296,6 +313,11 @@ namespace vk
 				enableDebugMarkers = true;
 			}
 
+			if (extensionSupported(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME))
+			{
+				deviceExtensions.push_back(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME);
+			}
+
 			if (deviceExtensions.size() > 0)
 			{
 				deviceCreateInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
@@ -519,6 +541,18 @@ namespace vk
 			{
 				vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
 			}
+		}
+
+		/** 
+		* Check if an extension is supported by the (physical device)
+		*
+		* @param extension Name of the extension to check
+		*
+		* @return True if the extension is supported (present in the list read at device creation time)
+		*/
+		bool extensionSupported(std::string extension)
+		{
+			return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
 		}
 
 	};
