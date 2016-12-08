@@ -12,7 +12,7 @@
 #include <assert.h>
 #include <vector>
 #include <random>
-
+#include <unordered_map>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -52,18 +52,42 @@ struct Vertex
 	glm::vec3 tangent;
 };
 
-struct {
-	VkPipeline composition;
-	VkPipeline compositionNoSSAO;
-	VkPipeline debug;
-	struct {
-		VkPipeline solid; // todo : rename
-		//VkPipeline bump;
-		VkPipeline blend;
-	} scene;
-	VkPipeline ssao;
-	VkPipeline ssaoBlur;
-} pipelines;
+template <typename T> 
+class VulkanResourceList
+{
+public:
+	VkDevice &device;
+	std::unordered_map<std::string, T> resources;
+	VulkanResourceList(VkDevice &dev) : device(dev) {};
+	T get(std::string name)
+	{
+		return resources[name];
+	}
+};
+
+class PipelineList : public VulkanResourceList<VkPipeline>
+{
+public:
+	PipelineList(VkDevice &dev) : VulkanResourceList(dev) {};
+
+	~PipelineList()
+	{
+		for (auto& pipeline : resources)
+		{
+			vkDestroyPipeline(device, pipeline.second, nullptr);
+		}
+	}
+
+	VkPipeline addGraphicsPipeline(std::string name, VkGraphicsPipelineCreateInfo &pipelineCreateInfo, VkPipelineCache &pipelineCache)
+	{
+		VkPipeline pipeline;
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline));
+		resources[name] = pipeline;
+		return pipeline;
+	}
+};
+
+PipelineList *pipelineList;
 
 struct SceneMaterial 
 {
@@ -74,7 +98,7 @@ struct SceneMaterial
 	bool hasAlpha = false;
 	bool hasBump = false;
 	bool hasSpecular = false;
-	VkPipeline *pipeline;
+	VkPipeline pipeline;
 };
 
 struct SceneMesh
@@ -199,7 +223,7 @@ private:
 				materials[i].hasAlpha = true;
 			}
 
-			materials[i].pipeline = &pipelines.scene.solid;
+			materials[i].pipeline = pipelineList->get("scene.solid");
 		}
 
 	}
@@ -687,12 +711,13 @@ public:
 		srand(time(NULL));
 
 		enableNVDedicatedAllocation = vulkanDevice->extensionSupported(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME);
+
+		pipelineList = new PipelineList(vulkanDevice->logicalDevice);
 	}
 
 	~VulkanExample()
 	{
-		// Clean up used Vulkan resources 
-		// Note : Inherited destructor cleans up resources stored in base class
+		delete pipelineList;
 
 		vkDestroySampler(device, colorSampler, nullptr);
 
@@ -710,14 +735,6 @@ public:
 		vkFreeMemory(device, frameBuffers.offscreen.depth.mem, nullptr);
 
 		vkDestroyFramebuffer(device, frameBuffers.offscreen.frameBuffer, nullptr);
-
-		vkDestroyPipeline(device, pipelines.composition, nullptr);
-		vkDestroyPipeline(device, pipelines.compositionNoSSAO, nullptr);
-
-		vkDestroyPipeline(device, pipelines.scene.solid, nullptr);
-		//vkDestroyPipeline(device, pipelines.scene.bump, nullptr);
-		vkDestroyPipeline(device, pipelines.scene.blend, nullptr);
-		vkDestroyPipeline(device, pipelines.debug, nullptr);
 
 		vkDestroyPipelineLayout(device, pipelineLayouts.composition, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayouts.offscreen, nullptr);
@@ -1132,7 +1149,7 @@ public:
 			0);
 		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene.solid);
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.solid"));
 
 		VkDeviceSize offsets[1] = { 0 };
 
@@ -1143,14 +1160,13 @@ public:
 				continue;
 			}
 			// todo : perf
-			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.material->pipeline);
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
 			vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &mesh.vertexBuffer, offsets);
 			vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 		}
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene.blend);
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.blend"));
 
 		for (auto mesh : scene->meshes)
 		{
@@ -1189,7 +1205,7 @@ public:
 			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssao, 0, 1, &descriptorSets.ssao, 0, NULL);
-			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.ssao);
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("ssao.generate"));
 			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
 			vkCmdEndRenderPass(offScreenCmdBuffer);
@@ -1210,7 +1226,7 @@ public:
 			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssaoBlur, 0, 1, &descriptorSets.ssaoBlur, 0, NULL);
-			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.ssaoBlur);
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("ssao.blur"));
 			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
 			vkCmdEndRenderPass(offScreenCmdBuffer);
@@ -1285,7 +1301,7 @@ public:
 
 			if (debugDisplay)
 			{
-				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.debug);
+				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("debugdisplay"));
 				vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &meshes.quad.vertices.buf, offsets);
 				vkCmdBindIndexBuffer(drawCmdBuffers[i], meshes.quad.indices.buf, 0, VK_INDEX_TYPE_UINT32);
 				vkCmdDrawIndexed(drawCmdBuffers[i], meshes.quad.indexCount, 1, 0, 0, 1);
@@ -1296,7 +1312,7 @@ public:
 			}
 
 			// Final composition as full screen quad
-			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, (enableSSAO) ? pipelines.composition : pipelines.compositionNoSSAO);
+			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get(enableSSAO ? "composition.ssao.enabled" : "composition.ssao.disabled"));
 			vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &meshes.quad.vertices.buf, offsets);
 			vkCmdBindIndexBuffer(drawCmdBuffers[i], meshes.quad.indices.buf, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(drawCmdBuffers[i], 6, 1, 0, 0, 1);
@@ -1637,22 +1653,21 @@ public:
 			shaderStages[1].pSpecializationInfo = &specializationInfo;
 
 			// SSAO enabled
-			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.composition));
+			pipelineList->addGraphicsPipeline("composition.ssao.enabled", pipelineCreateInfo, pipelineCache);
 			// SSAO disabled
 			specializationData.enableSSAO = 0;
-			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.compositionNoSSAO));
+			pipelineList->addGraphicsPipeline("composition.ssao.disabled", pipelineCreateInfo, pipelineCache);
 		}
 
 		// Derivate info for other pipelines
 		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 		pipelineCreateInfo.basePipelineIndex = -1;
-		pipelineCreateInfo.basePipelineHandle = pipelines.composition;
+		pipelineCreateInfo.basePipelineHandle = pipelineList->get("composition.ssao.enabled");
 
 		// Debug display pipeline
-
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.debug));
+		pipelineList->addGraphicsPipeline("debugdisplay", pipelineCreateInfo, pipelineCache);
 
 		// Fill G-Buffer
 
@@ -1690,13 +1705,13 @@ public:
 
 		colorBlendState.attachmentCount = blendAttachmentStates.size();
 		colorBlendState.pAttachments = blendAttachmentStates.data();
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.solid));
+		pipelineList->addGraphicsPipeline("scene.solid", pipelineCreateInfo, pipelineCache);
 
 		// Transparent objects (discard by alpha)
 		depthStencilState.depthWriteEnable = VK_FALSE;
 		rasterizationState.cullMode = VK_CULL_MODE_NONE;
 		specializationData.discard = 1;
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.scene.blend));
+		pipelineList->addGraphicsPipeline("scene.blend", pipelineCreateInfo, pipelineCache);
 
 		// SSAO
 		colorBlendState.attachmentCount = 1;
@@ -1733,7 +1748,7 @@ public:
 			shaderStages[1].pSpecializationInfo = &specializationInfo;
 			pipelineCreateInfo.renderPass = frameBuffers.ssao.renderPass;
 			pipelineCreateInfo.layout = pipelineLayouts.ssao;
-			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.ssao));
+			pipelineList->addGraphicsPipeline("ssao.generate", pipelineCreateInfo, pipelineCache);
 		}
 
 
@@ -1742,7 +1757,7 @@ public:
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/blur.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		pipelineCreateInfo.renderPass = frameBuffers.ssaoBlur.renderPass;
 		pipelineCreateInfo.layout = pipelineLayouts.ssaoBlur;
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.ssaoBlur));
+		pipelineList->addGraphicsPipeline("ssao.blur", pipelineCreateInfo, pipelineCache);
 	}
 
 	inline float lerp(float a, float b, float f)
