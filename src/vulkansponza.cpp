@@ -33,6 +33,8 @@
 #define SSAO_RADIUS 2.0f
 #define SSAO_NOISE_DIM 4
 
+//#define PER_MESH_BUFFERS
+
 // Vertex layout for this example
 std::vector<vkMeshLoader::VertexLayout> vertexLayout =
 {
@@ -110,6 +112,7 @@ struct SceneMesh
 	VkDeviceMemory indexMemory;
 
 	uint32_t indexCount;
+	uint32_t indexBase;
 
 	// Better move to material and share among meshes with same material
 	VkDescriptorSet descriptorSet;
@@ -230,6 +233,10 @@ private:
 
 	void loadMeshes(VkCommandBuffer copyCmd)		
 	{
+		std::vector<Vertex> gVertices;
+		std::vector<uint32_t> gIndices;
+		uint32_t gIndexBase = 0;
+
 		meshes.resize(aScene->mNumMeshes);
 		for (uint32_t i = 0; i < meshes.size(); i++)
 		{
@@ -240,6 +247,7 @@ private:
 			std::cout << "	Faces: " << aMesh->mNumFaces << std::endl;
 			
 			meshes[i].material = &materials[aMesh->mMaterialIndex];
+			meshes[i].indexBase = gIndexBase;
 
 			// Vertices
 			std::vector<Vertex> vertices;			
@@ -247,6 +255,8 @@ private:
 
 			bool hasUV = aMesh->HasTextureCoords(0);
 			bool hasTangent = aMesh->HasTangentsAndBitangents();
+
+			uint32_t vertexBase = gVertices.size();
 
 			for (uint32_t i = 0; i < aMesh->mNumVertices; i++)
 			{
@@ -257,6 +267,7 @@ private:
 				vertices[i].normal.y = -vertices[i].normal.y;
 				vertices[i].color = glm::vec3(1.0f); // todo : take from material
 				vertices[i].tangent = (hasTangent) ? glm::make_vec3(&aMesh->mTangents[i].x) : glm::vec3(0.0f, 1.0f, 0.0f);
+				gVertices.push_back(vertices[i]);
 			}
 
 			// Indices
@@ -269,6 +280,10 @@ private:
 				indices[i * 3] = aMesh->mFaces[i].mIndices[0];
 				indices[i * 3 + 1] = aMesh->mFaces[i].mIndices[1];
 				indices[i * 3 + 2] = aMesh->mFaces[i].mIndices[2];
+				gIndices.push_back(indices[i*3] + vertexBase);
+				gIndices.push_back(indices[i*3+1] + vertexBase);
+				gIndices.push_back(indices[i*3+2] + vertexBase);
+				gIndexBase += 3;
 			}
 
 			// Create buffers
@@ -382,6 +397,114 @@ private:
 			vkFreeMemory(device, staging.iBuffer.memory, nullptr);
 		}
 
+		/* test: global buffers */
+
+		size_t vertexDataSize = gVertices.size() * sizeof(Vertex);
+		size_t indexDataSize = gIndices.size() * sizeof(uint32_t);
+
+		VkMemoryAllocateInfo memAlloc = vkTools::initializers::memoryAllocateInfo();
+		VkMemoryRequirements memReqs;
+
+		VkResult err;
+		void *data;
+
+		struct
+		{
+			struct {
+				VkDeviceMemory memory;
+				VkBuffer buffer;
+			} vBuffer;
+			struct {
+				VkDeviceMemory memory;
+				VkBuffer buffer;
+			} iBuffer;
+		} staging;
+
+		// Generate vertex buffer
+		VkBufferCreateInfo vBufferInfo;
+
+		// Staging buffer
+		vBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vertexDataSize);
+		VK_CHECK_RESULT(vkCreateBuffer(device, &vBufferInfo, nullptr, &staging.vBuffer.buffer));
+		vkGetBufferMemoryRequirements(device, staging.vBuffer.buffer, &memReqs);
+		memAlloc.allocationSize = memReqs.size;
+		memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.vBuffer.memory));
+		VK_CHECK_RESULT(vkMapMemory(device, staging.vBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+		memcpy(data, gVertices.data(), vertexDataSize);
+		vkUnmapMemory(device, staging.vBuffer.memory);
+		VK_CHECK_RESULT(vkBindBufferMemory(device, staging.vBuffer.buffer, staging.vBuffer.memory, 0));
+
+		// Target
+		vBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, vertexDataSize);
+		VK_CHECK_RESULT(vkCreateBuffer(device, &vBufferInfo, nullptr, &vertexBuffer.buffer));
+		vkGetBufferMemoryRequirements(device, vertexBuffer.buffer, &memReqs);
+		memAlloc.allocationSize = memReqs.size;
+		memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &vertexBuffer.memory));
+		VK_CHECK_RESULT(vkBindBufferMemory(device, vertexBuffer.buffer, vertexBuffer.memory, 0));
+
+		// Generate index buffer
+		VkBufferCreateInfo iBufferInfo;
+
+		// Staging buffer
+		iBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, indexDataSize);
+		VK_CHECK_RESULT(vkCreateBuffer(device, &iBufferInfo, nullptr, &staging.iBuffer.buffer));
+		vkGetBufferMemoryRequirements(device, staging.iBuffer.buffer, &memReqs);
+		memAlloc.allocationSize = memReqs.size;
+		memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.iBuffer.memory));
+		VK_CHECK_RESULT(vkMapMemory(device, staging.iBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+		memcpy(data, gIndices.data(), indexDataSize);
+		vkUnmapMemory(device, staging.iBuffer.memory);
+		VK_CHECK_RESULT(vkBindBufferMemory(device, staging.iBuffer.buffer, staging.iBuffer.memory, 0));
+
+		// Target
+		iBufferInfo = vkTools::initializers::bufferCreateInfo(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, indexDataSize);
+		VK_CHECK_RESULT(vkCreateBuffer(device, &iBufferInfo, nullptr, &indexBuffer.buffer));
+		vkGetBufferMemoryRequirements(device, indexBuffer.buffer, &memReqs);
+		memAlloc.allocationSize = memReqs.size;
+		memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &indexBuffer.memory));
+		VK_CHECK_RESULT(vkBindBufferMemory(device, indexBuffer.buffer, indexBuffer.memory, 0));
+
+		// Copy
+		VkCommandBufferBeginInfo cmdBufInfo = vkTools::initializers::commandBufferBeginInfo();
+		VK_CHECK_RESULT(vkBeginCommandBuffer(copyCmd, &cmdBufInfo));
+
+		VkBufferCopy copyRegion = {};
+
+		copyRegion.size = vertexDataSize;
+		vkCmdCopyBuffer(
+			copyCmd,
+			staging.vBuffer.buffer,
+			vertexBuffer.buffer,
+			1,
+			&copyRegion);
+
+		copyRegion.size = indexDataSize;
+		vkCmdCopyBuffer(
+			copyCmd,
+			staging.iBuffer.buffer,
+			indexBuffer.buffer,
+			1,
+			&copyRegion);
+
+		VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
+
+		VkSubmitInfo submitInfo = {};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &copyCmd;
+
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+		VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+
+		vkDestroyBuffer(device, staging.vBuffer.buffer, nullptr);
+		vkFreeMemory(device, staging.vBuffer.memory, nullptr);
+		vkDestroyBuffer(device, staging.iBuffer.buffer, nullptr);
+		vkFreeMemory(device, staging.iBuffer.memory, nullptr);
+
 		// Generate descriptor sets for all meshes
 		// todo : think about a nicer solution, better suited per material?
 
@@ -489,6 +612,9 @@ public:
 
 	std::vector<SceneMaterial> materials;
 	std::vector<SceneMesh> meshes;
+
+	vk::Buffer vertexBuffer;
+	vk::Buffer indexBuffer;
 
 	// Same for all meshes in the scene
 	VkDescriptorSetLayout descriptorSetLayout;
@@ -1153,13 +1279,14 @@ public:
 
 		VkDeviceSize offsets[1] = { 0 };
 
+#ifdef PER_MESH_BUFFERS
+		// Render using separate buffers
 		for (auto mesh : scene->meshes)
 		{
 			if (mesh.material->hasAlpha)
 			{
 				continue;
 			}
-			// todo : perf
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
 			vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &mesh.vertexBuffer, offsets);
 			vkCmdBindIndexBuffer(offScreenCmdBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1178,6 +1305,35 @@ public:
 				vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 			}
 		}
+
+#else
+		// Render from global buffer using index offsets
+		vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &scene->vertexBuffer.buffer, offsets);
+		vkCmdBindIndexBuffer(offScreenCmdBuffer, scene->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+		for (auto mesh : scene->meshes)
+		{
+			if (mesh.material->hasAlpha)
+			{
+				continue;
+			}
+			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
+			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, mesh.indexBase, 0);
+		}
+
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.blend"));
+
+		for (auto mesh : scene->meshes)
+		{
+			if (mesh.material->hasAlpha)
+			{
+				vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
+				vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, mesh.indexBase, 0);
+			}
+		}
+
+
+#endif
 
 		vkCmdEndRenderPass(offScreenCmdBuffer);
 
@@ -1388,7 +1544,7 @@ public:
 		vertices.bindingDescriptions[0] =
 			vkTools::initializers::vertexInputBindingDescription(
 				VERTEX_BUFFER_BIND_ID,
-				vkMeshLoader::vertexSize(vertexLayout),
+				sizeof(Vertex),
 				VK_VERTEX_INPUT_RATE_VERTEX);
 
 		// Attribute descriptions
@@ -1399,35 +1555,35 @@ public:
 				VERTEX_BUFFER_BIND_ID,
 				0,
 				VK_FORMAT_R32G32B32_SFLOAT,
-				0);
+				offsetof(Vertex, pos));
 		// Location 1: Texture coordinates
 		vertices.attributeDescriptions[1] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				1,
 				VK_FORMAT_R32G32_SFLOAT,
-				sizeof(float) * 3);
+				offsetof(Vertex, uv));
 		// Location 2: Color
 		vertices.attributeDescriptions[2] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				2,
 				VK_FORMAT_R32G32B32_SFLOAT,
-				sizeof(float) * 5);
+				offsetof(Vertex, color));
 		// Location 3: Normal
 		vertices.attributeDescriptions[3] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				3,
 				VK_FORMAT_R32G32B32_SFLOAT,
-				sizeof(float) * 8);
+				offsetof(Vertex, normal));
 		// Location 4: Tangent
 		vertices.attributeDescriptions[4] =
 			vkTools::initializers::vertexInputAttributeDescription(
 				VERTEX_BUFFER_BIND_ID,
 				4,
 				VK_FORMAT_R32G32B32_SFLOAT,
-				sizeof(float) * 11);
+				offsetof(Vertex, tangent));
 
 		vertices.inputState = vkTools::initializers::pipelineVertexInputStateCreateInfo();
 		vertices.inputState.vertexBindingDescriptionCount = vertices.bindingDescriptions.size();
