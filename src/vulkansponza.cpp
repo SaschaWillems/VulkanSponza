@@ -692,6 +692,7 @@ public:
 
 	// Vendor specific
 	bool enableNVDedicatedAllocation = false;
+	bool enableAMDRasterizationOrder = false;
 
 	struct {
 		vkTools::VulkanTexture colorMap;
@@ -837,6 +838,7 @@ public:
 		srand(time(NULL));
 
 		enableNVDedicatedAllocation = vulkanDevice->extensionSupported(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME);
+		enableAMDRasterizationOrder = vulkanDevice->extensionSupported(VK_AMD_RASTERIZATION_ORDER_EXTENSION_NAME);
 
 		pipelineList = new PipelineList(vulkanDevice->logicalDevice);
 	}
@@ -1781,13 +1783,13 @@ public:
 		pipelineCreateInfo.pStages = shaderStages.data();
 		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
-		/*
-		VkPipelineRasterizationStateRasterizationOrderAMD rasterAMD = {};
-		rasterAMD.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD;
-		rasterAMD.rasterizationOrder = VK_RASTERIZATION_ORDER_RELAXED_AMD;
-
-		rasterizationState.pNext = &rasterAMD;
-		*/
+		if (enableAMDRasterizationOrder)
+		{
+			VkPipelineRasterizationStateRasterizationOrderAMD rasterAMD{};
+			rasterAMD.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD;
+			rasterAMD.rasterizationOrder = VK_RASTERIZATION_ORDER_RELAXED_AMD;
+			rasterizationState.pNext = &rasterAMD;
+		}
 
 		// Final composition pipeline
 		{

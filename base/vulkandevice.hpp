@@ -319,6 +319,11 @@ namespace vk
 				deviceExtensions.push_back(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME);
 			}
 
+			if (extensionSupported(VK_AMD_RASTERIZATION_ORDER_EXTENSION_NAME))
+			{
+				deviceExtensions.push_back(VK_AMD_RASTERIZATION_ORDER_EXTENSION_NAME);
+			}
+
 			if (deviceExtensions.size() > 0)
 			{
 				deviceCreateInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
