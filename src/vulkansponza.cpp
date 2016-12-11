@@ -61,9 +61,13 @@ public:
 	VkDevice &device;
 	std::unordered_map<std::string, T> resources;
 	VulkanResourceList(VkDevice &dev) : device(dev) {};
-	T get(std::string name)
+	const T get(std::string name)
 	{
 		return resources[name];
+	}
+	bool present(std::string name)
+	{
+		return resources.find(name) != resources.end();
 	}
 };
 
@@ -89,7 +93,38 @@ public:
 	}
 };
 
-PipelineList *pipelineList;
+class TextureList : public VulkanResourceList<vkTools::VulkanTexture>
+{
+private:	
+	vkTools::VulkanTextureLoader *textureLoader;
+public:
+	TextureList(VkDevice &dev, vkTools::VulkanTextureLoader *textureloader) : 
+		VulkanResourceList(dev), 
+		textureLoader(textureloader) { };
+
+	~TextureList()
+	{
+		for (auto& texture : resources)
+		{
+			textureLoader->destroyTexture(texture.second);
+		}
+	}
+
+	vkTools::VulkanTexture addTexture2D(std::string name, std::string filename, VkFormat format)
+	{
+		vkTools::VulkanTexture texture;
+		textureLoader->loadTexture(filename, format, &texture);
+		resources[name] = texture;
+		return texture;
+	}
+
+};
+
+struct Resources
+{
+	PipelineList *pipelines;
+	TextureList *textures;
+} resources;
 
 struct SceneMaterial 
 {
@@ -157,6 +192,11 @@ private:
 
 	void loadMaterials()
 	{
+		// Add dummy textures for objects without texture
+		resources.textures->addTexture2D("dummy.diffuse", assetPath + "sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK);
+		resources.textures->addTexture2D("dummy.specular", assetPath + "sponza/dummy_specular.dds", VK_FORMAT_BC2_UNORM_BLOCK);
+		resources.textures->addTexture2D("dummy.bump", assetPath + "sponza/dummy_ddn.dds", VK_FORMAT_BC2_UNORM_BLOCK);
+
 		materials.resize(aScene->mNumMaterials);
 		
 		for (uint32_t i = 0; i < materials.size(); i++)
@@ -181,12 +221,16 @@ private:
 				std::string fileName = std::string(texturefile.C_Str());
 				diffuseMapFile = fileName;
 				std::replace(fileName.begin(), fileName.end(), '\\', '/');
-				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
+				if (!resources.textures->present(fileName)) {
+					materials[i].diffuse = resources.textures->addTexture2D(fileName, assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK);
+				} else {
+					materials[i].diffuse = resources.textures->get(fileName);
+				}
 			}
 			else
 			{
 				std::cout << "  Material has no diffuse, using dummy texture!" << std::endl;
-				textureLoader->loadTexture(assetPath + "sponza/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].diffuse);
+				materials[i].diffuse = resources.textures->get("dummy.diffuse");
 			}
 			// Specular
 			if (aScene->mMaterials[i]->GetTextureCount(aiTextureType_SPECULAR) > 0)
@@ -195,12 +239,17 @@ private:
 				std::cout << "  Specular: \"" << texturefile.C_Str() << "\"" << std::endl;
 				std::string fileName = std::string(texturefile.C_Str());
 				std::replace(fileName.begin(), fileName.end(), '\\', '/');
-				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].specular);
+				if (!resources.textures->present(fileName)) {
+					materials[i].specular = resources.textures->addTexture2D(fileName, assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK);
+				}
+				else {
+					materials[i].specular = resources.textures->get(fileName);
+				}
 			}
 			else
 			{
 				std::cout << "  Material has no specular, using dummy texture!" << std::endl;
-				textureLoader->loadTexture(assetPath + "sponza/dummy_specular.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].specular);
+				materials[i].specular = resources.textures->get("dummy.specular");
 			}
 
 			// Bump (map_bump is mapped to height by assimp)
@@ -210,13 +259,18 @@ private:
 				std::cout << "  Bump: \"" << texturefile.C_Str() << "\"" << std::endl;
 				std::string fileName = std::string(texturefile.C_Str());
 				std::replace(fileName.begin(), fileName.end(), '\\', '/');
-				textureLoader->loadTexture(assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].bump);
 				materials[i].hasBump = true;
+				if (!resources.textures->present(fileName)) {
+					materials[i].bump = resources.textures->addTexture2D(fileName, assetPath + fileName, VK_FORMAT_BC2_UNORM_BLOCK);
+				}
+				else {
+					materials[i].bump = resources.textures->get(fileName);
+				}
 			}
 			else
 			{
 				std::cout << "  Material has no bump, using dummy texture!" << std::endl;
-				textureLoader->loadTexture(assetPath + "sponza/dummy_ddn.dds", VK_FORMAT_BC2_UNORM_BLOCK, &materials[i].bump);
+				materials[i].bump = resources.textures->get("dummy.bump");
 			}
 
 			// Mask
@@ -226,7 +280,7 @@ private:
 				materials[i].hasAlpha = true;
 			}
 
-			materials[i].pipeline = pipelineList->get("scene.solid");
+			materials[i].pipeline = resources.pipelines->get("scene.solid");
 		}
 
 	}
@@ -637,11 +691,6 @@ public:
 			vkDestroyBuffer(device, mesh.indexBuffer, nullptr);
 			vkFreeMemory(device, mesh.indexMemory, nullptr);
 		}
-		for (auto material : materials)
-		{
-			textureLoader->destroyTexture(material.diffuse);
-			textureLoader->destroyTexture(material.bump);
-		}
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -695,7 +744,6 @@ public:
 	bool enableAMDRasterizationOrder = false;
 
 	struct {
-		vkTools::VulkanTexture colorMap;
 		vkTools::VulkanTexture ssaoNoise;
 	} textures;
 
@@ -839,13 +887,12 @@ public:
 
 		enableNVDedicatedAllocation = vulkanDevice->extensionSupported(VK_NV_DEDICATED_ALLOCATION_EXTENSION_NAME);
 		enableAMDRasterizationOrder = vulkanDevice->extensionSupported(VK_AMD_RASTERIZATION_ORDER_EXTENSION_NAME);
-
-		pipelineList = new PipelineList(vulkanDevice->logicalDevice);
 	}
 
 	~VulkanExample()
 	{
-		delete pipelineList;
+		delete resources.pipelines;
+		delete resources.textures;
 
 		vkDestroySampler(device, colorSampler, nullptr);
 
@@ -881,8 +928,6 @@ public:
 		vkFreeCommandBuffers(device, cmdPool, 1, &offScreenCmdBuffer);
 
 		vkDestroyRenderPass(device, frameBuffers.offscreen.renderPass, nullptr);
-
-		textureLoader->destroyTexture(textures.colorMap);
 
 		vkDestroySemaphore(device, offscreenSemaphore, nullptr);
 
@@ -1277,7 +1322,7 @@ public:
 			0);
 		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.solid"));
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("scene.solid"));
 
 		VkDeviceSize offsets[1] = { 0 };
 
@@ -1323,7 +1368,7 @@ public:
 			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, mesh.indexBase, 0);
 		}
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.blend"));
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("scene.blend"));
 
 		for (auto mesh : scene->meshes)
 		{
@@ -1363,7 +1408,7 @@ public:
 			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssao, 0, 1, &descriptorSets.ssao, 0, NULL);
-			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("ssao.generate"));
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("ssao.generate"));
 			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
 			vkCmdEndRenderPass(offScreenCmdBuffer);
@@ -1384,21 +1429,13 @@ public:
 			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssaoBlur, 0, 1, &descriptorSets.ssaoBlur, 0, NULL);
-			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("ssao.blur"));
+			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("ssao.blur"));
 			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
 			vkCmdEndRenderPass(offScreenCmdBuffer);
 		}
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(offScreenCmdBuffer));
-	}
-
-	void loadTextures()
-	{
-		textureLoader->loadTexture(
-			getAssetPath() + "sponza/background.dds",
-			VK_FORMAT_BC2_UNORM_BLOCK,
-			&textures.colorMap);
 	}
 
 	void reBuildCommandBuffers()
@@ -1459,7 +1496,7 @@ public:
 
 			if (debugDisplay)
 			{
-				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("debugdisplay"));
+				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("debugdisplay"));
 				vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &meshes.quad.vertices.buf, offsets);
 				vkCmdBindIndexBuffer(drawCmdBuffers[i], meshes.quad.indices.buf, 0, VK_INDEX_TYPE_UINT32);
 				vkCmdDrawIndexed(drawCmdBuffers[i], meshes.quad.indexCount, 1, 0, 0, 1);
@@ -1470,7 +1507,7 @@ public:
 			}
 
 			// Final composition as full screen quad
-			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get(enableSSAO ? "composition.ssao.enabled" : "composition.ssao.disabled"));
+			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get(enableSSAO ? "composition.ssao.enabled" : "composition.ssao.disabled"));
 			vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &meshes.quad.vertices.buf, offsets);
 			vkCmdBindIndexBuffer(drawCmdBuffers[i], meshes.quad.indices.buf, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(drawCmdBuffers[i], 6, 1, 0, 0, 1);
@@ -1712,7 +1749,6 @@ public:
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorAllocInfo, &descriptorSets.offscreen));
 		writeDescriptorSets = {
 			vkTools::initializers::writeDescriptorSet(descriptorSets.offscreen, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),// Binding 0 : Vertex shader uniform buffer			
-			vkTools::initializers::writeDescriptorSet(descriptorSets.offscreen, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &textures.colorMap.descriptor)	// Binding 1 : Scene color map
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 	}
@@ -1811,21 +1847,21 @@ public:
 			shaderStages[1].pSpecializationInfo = &specializationInfo;
 
 			// SSAO enabled
-			pipelineList->addGraphicsPipeline("composition.ssao.enabled", pipelineCreateInfo, pipelineCache);
+			resources.pipelines->addGraphicsPipeline("composition.ssao.enabled", pipelineCreateInfo, pipelineCache);
 			// SSAO disabled
 			specializationData.enableSSAO = 0;
-			pipelineList->addGraphicsPipeline("composition.ssao.disabled", pipelineCreateInfo, pipelineCache);
+			resources.pipelines->addGraphicsPipeline("composition.ssao.disabled", pipelineCreateInfo, pipelineCache);
 		}
 
 		// Derivate info for other pipelines
 		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 		pipelineCreateInfo.basePipelineIndex = -1;
-		pipelineCreateInfo.basePipelineHandle = pipelineList->get("composition.ssao.enabled");
+		pipelineCreateInfo.basePipelineHandle = resources.pipelines->get("composition.ssao.enabled");
 
 		// Debug display pipeline
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-		pipelineList->addGraphicsPipeline("debugdisplay", pipelineCreateInfo, pipelineCache);
+		resources.pipelines->addGraphicsPipeline("debugdisplay", pipelineCreateInfo, pipelineCache);
 
 		// Fill G-Buffer
 
@@ -1863,13 +1899,13 @@ public:
 
 		colorBlendState.attachmentCount = blendAttachmentStates.size();
 		colorBlendState.pAttachments = blendAttachmentStates.data();
-		pipelineList->addGraphicsPipeline("scene.solid", pipelineCreateInfo, pipelineCache);
+		resources.pipelines->addGraphicsPipeline("scene.solid", pipelineCreateInfo, pipelineCache);
 
 		// Transparent objects (discard by alpha)
 		depthStencilState.depthWriteEnable = VK_FALSE;
 		rasterizationState.cullMode = VK_CULL_MODE_NONE;
 		specializationData.discard = 1;
-		pipelineList->addGraphicsPipeline("scene.blend", pipelineCreateInfo, pipelineCache);
+		resources.pipelines->addGraphicsPipeline("scene.blend", pipelineCreateInfo, pipelineCache);
 
 		// SSAO
 		colorBlendState.attachmentCount = 1;
@@ -1906,7 +1942,7 @@ public:
 			shaderStages[1].pSpecializationInfo = &specializationInfo;
 			pipelineCreateInfo.renderPass = frameBuffers.ssao.renderPass;
 			pipelineCreateInfo.layout = pipelineLayouts.ssao;
-			pipelineList->addGraphicsPipeline("ssao.generate", pipelineCreateInfo, pipelineCache);
+			resources.pipelines->addGraphicsPipeline("ssao.generate", pipelineCreateInfo, pipelineCache);
 		}
 
 
@@ -1915,7 +1951,7 @@ public:
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/blur.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		pipelineCreateInfo.renderPass = frameBuffers.ssaoBlur.renderPass;
 		pipelineCreateInfo.layout = pipelineLayouts.ssaoBlur;
-		pipelineList->addGraphicsPipeline("ssao.blur", pipelineCreateInfo, pipelineCache);
+		resources.pipelines->addGraphicsPipeline("ssao.blur", pipelineCreateInfo, pipelineCache);
 	}
 
 	inline float lerp(float a, float b, float f)
@@ -2180,10 +2216,12 @@ public:
 	{
 		VulkanExampleBase::prepare();
 
+		resources.pipelines = new PipelineList(vulkanDevice->logicalDevice);
+		resources.textures = new TextureList(vulkanDevice->logicalDevice, textureLoader);
+
 		// todo : sep func
 		deviceMemProps = deviceMemoryProperties;
 
-		loadTextures();
 		generateQuads();
 		setupVertexDescriptions();
 		prepareOffscreenFramebuffers();
