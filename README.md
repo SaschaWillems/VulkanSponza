@@ -11,13 +11,16 @@ Partially based on my Vulkan examples (C++), with the goal of rendering a more c
 As this is just a playground, expect frequent (and possibly breaking) changes.
 
 ## Platforms
-Should run on all platforms supported by my examples, but may brake from time to time. I usually test on Windows and Android, with the later one having gamepad support for camera movement.
+Windows, Android and Linux
+
+Visual Studio 2015 project is included along with a CMakeLists.txt for other compilers and platforms.
 
 ## Features
 - Deferred renderer (4 MRTs)
 - Separate pass for alpha masked objects (foliage)
 - Multiple dynamic light sources
 - Normal mapping
+- SSAO
 
 ## The Sponza scene
 The model used for this example is [Crytek's Atrium Sponza Palace model](http://www.crytek.com/cryengine/cryengine3/downloads). The repository contains an updated version of the (already updated) version from [Morgan McGuire](http://graphics.cs.williams.edu/data/meshes.xml).
