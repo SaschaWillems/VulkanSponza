@@ -1934,11 +1934,13 @@ public:
 
 			struct SpecializationData {
 				int32_t enableSSAO = 1;
+				float ambientFactor = 0.15f;
 			} specializationData;
 
 			std::vector<VkSpecializationMapEntry> specializationMapEntries;
 			specializationMapEntries = {
-				vkTools::initializers::specializationMapEntry(0, 0, sizeof(int32_t)),
+				vkTools::initializers::specializationMapEntry(0, offsetof(SpecializationData, enableSSAO), sizeof(int32_t)),
+				vkTools::initializers::specializationMapEntry(1, offsetof(SpecializationData, ambientFactor), sizeof(float)),
 			};
 			VkSpecializationInfo specializationInfo = vkTools::initializers::specializationInfo(specializationMapEntries.size(), specializationMapEntries.data(), sizeof(specializationData), &specializationData);
 			shaderStages[1].pSpecializationInfo = &specializationInfo;

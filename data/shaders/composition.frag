@@ -9,6 +9,7 @@ layout (binding = 3) uniform usampler2D samplerAlbedo;
 layout (binding = 4) uniform sampler2D samplerSSAO;
 
 layout (constant_id = 0) const int SSAO_ENABLED = 1;
+layout (constant_id = 1) const float AMBIENT_FACTOR = 0.0;
 
 layout (location = 0) in vec2 inUV;
 
@@ -51,7 +52,7 @@ void main()
 	vec4 spec;
 	spec.rg = unpackHalf2x16(albedo.b);	
 
-	vec3 ambient = color.rgb * 0.1;	
+	vec3 ambient = color.rgb * AMBIENT_FACTOR;	
 	vec3 fragcolor  = ambient;
 	
 	if (length(fragPos) == 0.0)
