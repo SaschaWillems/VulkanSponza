@@ -65,9 +65,35 @@ public:
 	{
 		return resources[name];
 	}
+	const T *getPtr(std::string name)
+	{
+		return &resources[name];
+	}
 	bool present(std::string name)
 	{
 		return resources.find(name) != resources.end();
+	}
+};
+
+class PipelineLayoutList : public VulkanResourceList<VkPipelineLayout>
+{
+public:
+	PipelineLayoutList(VkDevice &dev) : VulkanResourceList(dev) {};
+
+	~PipelineLayoutList()
+	{
+		for (auto& pipelineLayout : resources)
+		{
+			vkDestroyPipelineLayout(device, pipelineLayout.second, nullptr);
+		}
+	}
+
+	VkPipelineLayout add(std::string name, VkPipelineLayoutCreateInfo &createInfo)
+	{
+		VkPipelineLayout pipelineLayout;
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &createInfo, nullptr, &pipelineLayout));
+		resources[name] = pipelineLayout;
+		return pipelineLayout;
 	}
 };
 
@@ -118,11 +144,68 @@ public:
 		return texture;
 	}
 
+	vkTools::VulkanTexture addCubemap(std::string name, std::string filename, VkFormat format)
+	{
+		vkTools::VulkanTexture texture;
+		textureLoader->loadCubemap(filename, format, &texture);
+		resources[name] = texture;
+		return texture;
+	}
 };
+
+class DescriptorSetLayoutList : public VulkanResourceList<VkDescriptorSetLayout>
+{
+public:
+	DescriptorSetLayoutList(VkDevice &dev) : VulkanResourceList(dev) {};
+
+	~DescriptorSetLayoutList()
+	{
+		for (auto& descriptorSetLayout : resources)
+		{
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout.second, nullptr);
+		}
+	}
+
+	VkDescriptorSetLayout add(std::string name, VkDescriptorSetLayoutCreateInfo createInfo)
+	{
+		VkDescriptorSetLayout descriptorSetLayout;
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &createInfo, nullptr, &descriptorSetLayout));
+		resources[name] = descriptorSetLayout;
+		return descriptorSetLayout;
+	}
+};
+
+class DescriptorSetList : public VulkanResourceList<VkDescriptorSet>
+{
+private:
+	VkDescriptorPool descriptorPool;
+public:
+	DescriptorSetList(VkDevice &dev, VkDescriptorPool pool) : VulkanResourceList(dev), descriptorPool(pool) {};
+
+	~DescriptorSetList()
+	{
+		for (auto& descriptorSet : resources)
+		{
+			vkFreeDescriptorSets(device, descriptorPool, 1, &descriptorSet.second);
+		}
+	}
+
+	VkDescriptorSet add(std::string name, VkDescriptorSetAllocateInfo allocInfo)
+	{
+		VkDescriptorSet descriptorSet;
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+		resources[name] = descriptorSet;
+		return descriptorSet;
+	}
+};
+
 
 struct Resources
 {
+	PipelineLayoutList* pipelineLayouts;
 	PipelineList *pipelines;
+	DescriptorSetLayoutList *descriptorSetLayouts;
+	DescriptorSetList * descriptorSets;
 	TextureList *textures;
 } resources;
 
@@ -749,6 +832,7 @@ public:
 
 	struct {
 		vkMeshLoader::MeshBuffer quad;
+		vkMeshLoader::MeshBuffer skybox;
 	} meshes;
 
 	struct {
@@ -793,27 +877,6 @@ public:
 		vk::Buffer ssaoKernel;
 		vk::Buffer ssaoParams;
 	} uniformBuffers;
-
-	struct {
-		VkPipelineLayout offscreen;
-		VkPipelineLayout ssao;
-		VkPipelineLayout ssaoBlur;
-		VkPipelineLayout composition;
-	} pipelineLayouts;
-
-	struct {
-		VkDescriptorSet offscreen;
-		VkDescriptorSet ssao;
-		VkDescriptorSet ssaoBlur;
-		VkDescriptorSet composition;
-	} descriptorSets;
-
-	struct {
-		VkDescriptorSetLayout offscreen;
-		VkDescriptorSetLayout ssao;
-		VkDescriptorSetLayout ssaoBlur;
-		VkDescriptorSetLayout composition;
-	} descriptorSetLayouts;
 
 	// Framebuffer for offscreen rendering
 	struct FrameBufferAttachment {
@@ -891,7 +954,10 @@ public:
 
 	~VulkanExample()
 	{
+		delete resources.pipelineLayouts;
 		delete resources.pipelines;
+		delete resources.descriptorSetLayouts;
+		delete resources.descriptorSets;
 		delete resources.textures;
 
 		vkDestroySampler(device, colorSampler, nullptr);
@@ -911,12 +977,6 @@ public:
 
 		vkDestroyFramebuffer(device, frameBuffers.offscreen.frameBuffer, nullptr);
 
-		vkDestroyPipelineLayout(device, pipelineLayouts.composition, nullptr);
-		vkDestroyPipelineLayout(device, pipelineLayouts.offscreen, nullptr);
-
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.composition, nullptr);
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.offscreen, nullptr);
-
 		// Meshes
 		vkMeshLoader::freeMeshBufferResources(device, &meshes.quad);
 
@@ -932,6 +992,12 @@ public:
 		vkDestroySemaphore(device, offscreenSemaphore, nullptr);
 
 		delete(scene);
+	}
+
+	void loadAssets()
+	{
+		resources.textures->addCubemap("skybox", getAssetPath() + "textures/skybox.ktx", VK_FORMAT_R8G8B8A8_UNORM);
+		loadMesh(getAssetPath() + "cube.dae", &meshes.skybox, vertexLayout, 1.0f);
 	}
 
 	// Create a frame buffer attachment
@@ -1407,7 +1473,7 @@ public:
 			scissor = vkTools::initializers::rect2D(frameBuffers.ssao.width, frameBuffers.ssao.height, 0, 0);
 			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssao, 0, 1, &descriptorSets.ssao, 0, NULL);
+			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelineLayouts->get("ssao.generate"), 0, 1, resources.descriptorSets->getPtr("ssao.generate"), 0, NULL);
 			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("ssao.generate"));
 			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
@@ -1428,7 +1494,7 @@ public:
 			scissor = vkTools::initializers::rect2D(frameBuffers.ssaoBlur.width, frameBuffers.ssaoBlur.height, 0, 0);
 			vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.ssaoBlur, 0, 1, &descriptorSets.ssaoBlur, 0, NULL);
+			vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelineLayouts->get("ssao.blur"), 0, 1, resources.descriptorSets->getPtr("ssao.blur"), 0, NULL);
 			vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("ssao.blur"));
 			vkCmdDraw(offScreenCmdBuffer, 3, 1, 0, 0);
 
@@ -1492,7 +1558,7 @@ public:
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
 			VkDeviceSize offsets[1] = { 0 };
-			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.composition, 0, 1, &descriptorSets.composition, 0, NULL);
+			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelineLayouts->get("composition"), 0, 1, resources.descriptorSets->getPtr("composition"), 0, NULL);
 
 			if (debugDisplay)
 			{
@@ -1656,6 +1722,7 @@ public:
 		VkDescriptorSetAllocateInfo descriptorAllocInfo = vkTools::initializers::descriptorSetAllocateInfo(descriptorPool, nullptr, 1);
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets;
 		std::vector<VkDescriptorImageInfo> imageDescriptors;
+		VkDescriptorSet targetDS;
 
 		// Composition
 		setLayoutBindings = {
@@ -1667,11 +1734,11 @@ public:
 			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 5),				// Fragment shader uniform buffer
 		};
 		setLayoutCreateInfo = vkTools::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &setLayoutCreateInfo, nullptr, &descriptorSetLayouts.composition));
-		pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayouts.composition;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.composition));
-		descriptorAllocInfo.pSetLayouts = &descriptorSetLayouts.composition;
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorAllocInfo, &descriptorSets.composition));
+		resources.descriptorSetLayouts->add("composition", setLayoutCreateInfo);
+		pipelineLayoutCreateInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("composition");
+		resources.pipelineLayouts->add("composition", pipelineLayoutCreateInfo);
+		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("composition");
+		targetDS = resources.descriptorSets->add("composition", descriptorAllocInfo);
 		imageDescriptors = {
 			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[0].view, VK_IMAGE_LAYOUT_GENERAL),
 			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[1].view, VK_IMAGE_LAYOUT_GENERAL),
@@ -1679,12 +1746,12 @@ public:
 			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.ssaoBlur.attachments[0].view, VK_IMAGE_LAYOUT_GENERAL),
 		};	
 		writeDescriptorSets = {
-			vkTools::initializers::writeDescriptorSet(descriptorSets.composition, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.fullScreen.descriptor),	// Binding 0 : Vertex shader uniform buffer			
-			vkTools::initializers::writeDescriptorSet(descriptorSets.composition, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imageDescriptors[0]),				// Binding 1 : Position texture target			
-			vkTools::initializers::writeDescriptorSet(descriptorSets.composition, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &imageDescriptors[1]),				// Binding 2 : Normals texture target			
-			vkTools::initializers::writeDescriptorSet(descriptorSets.composition, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &imageDescriptors[2]),				// Binding 3 : Albedo texture target			
-			vkTools::initializers::writeDescriptorSet(descriptorSets.composition, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4, &imageDescriptors[3]),				// FS Sampler SSAO blurred
-			vkTools::initializers::writeDescriptorSet(descriptorSets.composition, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 5, &uniformBuffers.sceneLights.descriptor),	// Binding 4 : Fragment shader uniform buffer
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.fullScreen.descriptor),		// Binding 0 : Vertex shader uniform buffer			
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imageDescriptors[0]),				// Binding 1 : Position texture target			
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &imageDescriptors[1]),				// Binding 2 : Normals texture target			
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &imageDescriptors[2]),				// Binding 3 : Albedo texture target			
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4, &imageDescriptors[3]),				// FS Sampler SSAO blurred
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 5, &uniformBuffers.sceneLights.descriptor),		// Binding 4 : Fragment shader uniform buffer
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
@@ -1697,21 +1764,21 @@ public:
 			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 4),								// FS Params UBO 
 		};
 		setLayoutCreateInfo = vkTools::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &setLayoutCreateInfo, nullptr, &descriptorSetLayouts.ssao));
-		pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayouts.ssao;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.ssao));
-		descriptorAllocInfo.pSetLayouts = &descriptorSetLayouts.ssao;
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorAllocInfo, &descriptorSets.ssao));
+		resources.descriptorSetLayouts->add("ssao.generate", setLayoutCreateInfo);
+		pipelineLayoutCreateInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("ssao.generate");
+		resources.pipelineLayouts->add("ssao.generate", pipelineLayoutCreateInfo);
+		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("ssao.generate");
+		targetDS = resources.descriptorSets->add("ssao.generate", descriptorAllocInfo);
 		imageDescriptors = {
 			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[0].view, VK_IMAGE_LAYOUT_GENERAL),
 			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[1].view, VK_IMAGE_LAYOUT_GENERAL),
 		};
 		writeDescriptorSets = {
-			vkTools::initializers::writeDescriptorSet(descriptorSets.ssao, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageDescriptors[0]),					// FS Position+Depth
-			vkTools::initializers::writeDescriptorSet(descriptorSets.ssao, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imageDescriptors[1]),					// FS Normals
-			vkTools::initializers::writeDescriptorSet(descriptorSets.ssao, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &textures.ssaoNoise.descriptor),		// FS SSAO Noise
-			vkTools::initializers::writeDescriptorSet(descriptorSets.ssao, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3, &uniformBuffers.ssaoKernel.descriptor),		// FS SSAO Kernel UBO
-			vkTools::initializers::writeDescriptorSet(descriptorSets.ssao, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4, &uniformBuffers.ssaoParams.descriptor),		// FS SSAO Params UBO
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageDescriptors[0]),				// FS Position+Depth
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imageDescriptors[1]),				// FS Normals
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &textures.ssaoNoise.descriptor),		// FS SSAO Noise
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3, &uniformBuffers.ssaoKernel.descriptor),		// FS SSAO Kernel UBO
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4, &uniformBuffers.ssaoParams.descriptor),		// FS SSAO Params UBO
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 
@@ -1720,16 +1787,16 @@ public:
 			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0),						// FS Sampler SSAO
 		};
 		setLayoutCreateInfo = vkTools::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &setLayoutCreateInfo, nullptr, &descriptorSetLayouts.ssaoBlur));
-		pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayouts.ssaoBlur;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.ssaoBlur));
-		descriptorAllocInfo.pSetLayouts = &descriptorSetLayouts.ssaoBlur;
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorAllocInfo, &descriptorSets.ssaoBlur));
+		resources.descriptorSetLayouts->add("ssao.blur", setLayoutCreateInfo);
+		pipelineLayoutCreateInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("ssao.blur");
+		resources.pipelineLayouts->add("ssao.blur", pipelineLayoutCreateInfo);
+		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("ssao.blur");
+		targetDS = resources.descriptorSets->add("ssao.blur", descriptorAllocInfo);
 		imageDescriptors = {
 			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.ssao.attachments[0].view, VK_IMAGE_LAYOUT_GENERAL),
 		};
 		writeDescriptorSets = {
-			vkTools::initializers::writeDescriptorSet(descriptorSets.ssaoBlur, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageDescriptors[0]),
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageDescriptors[0]),
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 
@@ -1742,13 +1809,13 @@ public:
 		};
 		setLayoutCreateInfo.pBindings = setLayoutBindings.data();
 		setLayoutCreateInfo.bindingCount = setLayoutBindings.size();
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &setLayoutCreateInfo, nullptr, &descriptorSetLayouts.offscreen));
-		pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayouts.offscreen;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.offscreen));
-		descriptorAllocInfo.pSetLayouts = &descriptorSetLayouts.composition;
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorAllocInfo, &descriptorSets.offscreen));
+		resources.descriptorSetLayouts->add("offscreen", setLayoutCreateInfo);
+		pipelineLayoutCreateInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("offscreen");
+		resources.pipelineLayouts->add("offscreen", pipelineLayoutCreateInfo);
+		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("offscreen");
+		targetDS = resources.descriptorSets->add("offscreen", descriptorAllocInfo);
 		writeDescriptorSets = {
-			vkTools::initializers::writeDescriptorSet(descriptorSets.offscreen, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),// Binding 0 : Vertex shader uniform buffer			
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),// Binding 0 : Vertex shader uniform buffer			
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 	}
@@ -1829,7 +1896,7 @@ public:
 
 		// Final composition pipeline
 		{
-			pipelineCreateInfo.layout = pipelineLayouts.composition;
+			pipelineCreateInfo.layout = resources.pipelineLayouts->get("composition");
 			pipelineCreateInfo.renderPass = renderPass;
 
 			shaderStages[0] = loadShader(getAssetPath() + "shaders/composition.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
@@ -1889,7 +1956,7 @@ public:
 		shaderStages[1].pSpecializationInfo = &specializationInfo;
 
 		pipelineCreateInfo.renderPass = frameBuffers.offscreen.renderPass;
-		pipelineCreateInfo.layout = pipelineLayouts.offscreen;
+		pipelineCreateInfo.layout = resources.pipelineLayouts->get("offscreen");
 
 		std::array<VkPipelineColorBlendAttachmentState, 3> blendAttachmentStates = {
 			vkTools::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
@@ -1941,7 +2008,7 @@ public:
 			VkSpecializationInfo specializationInfo = vkTools::initializers::specializationInfo(specializationMapEntries.size(), specializationMapEntries.data(), sizeof(specializationData), &specializationData);
 			shaderStages[1].pSpecializationInfo = &specializationInfo;
 			pipelineCreateInfo.renderPass = frameBuffers.ssao.renderPass;
-			pipelineCreateInfo.layout = pipelineLayouts.ssao;
+			pipelineCreateInfo.layout = resources.pipelineLayouts->get("ssao.generate");
 			resources.pipelines->addGraphicsPipeline("ssao.generate", pipelineCreateInfo, pipelineCache);
 		}
 
@@ -1950,7 +2017,7 @@ public:
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/fullscreen.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/blur.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		pipelineCreateInfo.renderPass = frameBuffers.ssaoBlur.renderPass;
-		pipelineCreateInfo.layout = pipelineLayouts.ssaoBlur;
+		pipelineCreateInfo.layout = resources.pipelineLayouts->get("ssao.blur");
 		resources.pipelines->addGraphicsPipeline("ssao.blur", pipelineCreateInfo, pipelineCache);
 	}
 
@@ -2216,17 +2283,22 @@ public:
 	{
 		VulkanExampleBase::prepare();
 
+		setupDescriptorPool();
+
+		resources.pipelineLayouts = new PipelineLayoutList(vulkanDevice->logicalDevice);
 		resources.pipelines = new PipelineList(vulkanDevice->logicalDevice);
+		resources.descriptorSetLayouts = new DescriptorSetLayoutList(vulkanDevice->logicalDevice);
+		resources.descriptorSets = new DescriptorSetList(vulkanDevice->logicalDevice, descriptorPool);
 		resources.textures = new TextureList(vulkanDevice->logicalDevice, textureLoader);
 
 		// todo : sep func
 		deviceMemProps = deviceMemoryProperties;
 
 		generateQuads();
+		loadAssets();
 		setupVertexDescriptions();
 		prepareOffscreenFramebuffers();
 		prepareUniformBuffers();
-		setupDescriptorPool();
 		setupLayoutsAndDescriptors();
 		preparePipelines();
 		loadScene();
