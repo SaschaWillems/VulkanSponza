@@ -54,39 +54,46 @@ void main()
 	vec3 ambient = color.rgb * 0.1;	
 	vec3 fragcolor  = ambient;
 	
-	for(int i = 0; i < NUM_LIGHTS; ++i)
+	if (length(fragPos) == 0.0)
 	{
-		// Light to fragment
-		vec3 lightPos = vec3(ubo.view * ubo.model * vec4(ubo.lights[i].position.xyz, 1.0));
-		vec3 L = lightPos - fragPos;
-		float dist = length(L);
-		L = normalize(L);
+		fragcolor = color.rgb;
+	}
+	else
+	{	
+		for(int i = 0; i < NUM_LIGHTS; ++i)
+		{
+			// Light to fragment
+			vec3 lightPos = vec3(ubo.view * ubo.model * vec4(ubo.lights[i].position.xyz, 1.0));
+			vec3 L = lightPos - fragPos;
+			float dist = length(L);
+			L = normalize(L);
 
-		// Viewer to fragment
-		vec3 viewPos = vec3(ubo.view * ubo.model * vec4(ubo.viewPos.xyz, 1.0));
-		vec3 V = viewPos - fragPos;
-		V = normalize(V);
+			// Viewer to fragment
+			vec3 viewPos = vec3(ubo.view * ubo.model * vec4(ubo.viewPos.xyz, 1.0));
+			vec3 V = viewPos - fragPos;
+			V = normalize(V);
 
-		// Attenuation
-		float atten = ubo.lights[i].radius / (pow(dist, 2.0) + 1.0);
+			// Attenuation
+			float atten = ubo.lights[i].radius / (pow(dist, 2.0) + 1.0);
 
-		// Diffuse part
-		vec3 N = normalize(normal);
-		float NdotL = max(0.0, dot(N, L));
-		vec3 diff = ubo.lights[i].color.rgb * color.rgb * NdotL * atten;
+			// Diffuse part
+			vec3 N = normalize(normal);
+			float NdotL = max(0.0, dot(N, L));
+			vec3 diff = ubo.lights[i].color.rgb * color.rgb * NdotL * atten;
 
-		// Specular part
-		vec3 R = reflect(-L, N);
-		float NdotR = max(0.0, dot(R, V));
-		vec3 spec = ubo.lights[i].color.rgb * spec.r * pow(NdotR, 16.0) * (atten * 1.5);
+			// Specular part
+			vec3 R = reflect(-L, N);
+			float NdotR = max(0.0, dot(R, V));
+			vec3 spec = ubo.lights[i].color.rgb * spec.r * pow(NdotR, 16.0) * (atten * 1.5);
 
-		fragcolor += diff + spec;				
-	}    	
+			fragcolor += diff + spec;				
+		}    	
 
-	if (SSAO_ENABLED == 1)
-	{
-		float ao = texture(samplerSSAO, inUV).r;
-		fragcolor *= ao.rrr;
+		if (SSAO_ENABLED == 1)
+		{
+			float ao = texture(samplerSSAO, inUV).r;
+			fragcolor *= ao.rrr;
+		}
 	}
    
 	outFragcolor = vec4(fragcolor, 1.0);	

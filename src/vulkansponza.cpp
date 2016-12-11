@@ -832,7 +832,7 @@ public:
 
 	struct {
 		vkMeshLoader::MeshBuffer quad;
-		vkMeshLoader::MeshBuffer skybox;
+		vkMeshLoader::MeshBuffer skysphere;
 	} meshes;
 
 	struct {
@@ -936,9 +936,9 @@ public:
 		title = "Vulkan Sponza - (c) 2016 by Sascha Willems";
 
 		camera.type = Camera::CameraType::firstperson;
-		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
-		camera.setRotation(glm::vec3(7.0f, -75.0f, 0.0f));
-		camera.setTranslation(glm::vec3(0.0f, 2.5f, 0.0f));
+		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 512.0f);
+		camera.setRotation(glm::vec3(6.0f, -90.0f, 0.0f));
+		camera.setTranslation(glm::vec3(-125.0f, 6.25f, 0.0f));
 		camera.movementSpeed = 20.0f * 2.0f;
 
 		timerSpeed = 0.075f;
@@ -979,6 +979,7 @@ public:
 
 		// Meshes
 		vkMeshLoader::freeMeshBufferResources(device, &meshes.quad);
+		vkMeshLoader::freeMeshBufferResources(device, &meshes.skysphere);
 
 		// Uniform buffers
 		uniformBuffers.fullScreen.destroy();
@@ -996,8 +997,10 @@ public:
 
 	void loadAssets()
 	{
-		resources.textures->addCubemap("skybox", getAssetPath() + "textures/skybox.ktx", VK_FORMAT_R8G8B8A8_UNORM);
-		loadMesh(getAssetPath() + "cube.dae", &meshes.skybox, vertexLayout, 1.0f);
+		//resources.textures->addCubemap("skysphere", getAssetPath() + "textures/skysphere_darkstormy.ktx", VK_FORMAT_R8G8B8A8_UNORM);
+		//loadMesh(getAssetPath() + "cube.dae", &meshes.skysphere, vertexLayout, 10.0f);
+		resources.textures->addTexture2D("skysphere", getAssetPath() + "textures/skysphere_night.ktx", VK_FORMAT_R8G8B8A8_UNORM);
+		loadMesh(getAssetPath() + "skysphere.dae", &meshes.skysphere, vertexLayout, 1.0f);
 	}
 
 	// Create a frame buffer attachment
@@ -1388,9 +1391,16 @@ public:
 			0);
 		vkCmdSetScissor(offScreenCmdBuffer, 0, 1, &scissor);
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("scene.solid"));
-
 		VkDeviceSize offsets[1] = { 0 };
+
+		// skysphere
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("skysphere"));
+		vkCmdBindDescriptorSets(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelineLayouts->get("skysphere"), 0, 1, resources.descriptorSets->getPtr("skysphere"), 0, NULL);
+		vkCmdBindVertexBuffers(offScreenCmdBuffer, VERTEX_BUFFER_BIND_ID, 1, &meshes.skysphere.vertices.buf, offsets);
+		vkCmdBindIndexBuffer(offScreenCmdBuffer, meshes.skysphere.indices.buf, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexed(offScreenCmdBuffer, meshes.skysphere.indexCount, 1, 0, 0, 0);
+
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("scene.solid"));
 
 #ifdef PER_MESH_BUFFERS
 		// Render using separate buffers
@@ -1444,7 +1454,6 @@ public:
 				vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, mesh.indexBase, 0);
 			}
 		}
-
 
 #endif
 
@@ -1701,15 +1710,15 @@ public:
 	{
 		std::vector<VkDescriptorPoolSize> poolSizes =
 		{
-			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 8),
-			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 12)
+			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 9),
+			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 13)
 		};
 
 		VkDescriptorPoolCreateInfo descriptorPoolInfo =
 			vkTools::initializers::descriptorPoolCreateInfo(
 				poolSizes.size(),
 				poolSizes.data(),
-				4);
+				5);
 
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 	}
@@ -1818,6 +1827,27 @@ public:
 			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),// Binding 0 : Vertex shader uniform buffer			
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+
+		// skysphere
+		setLayoutBindings = {
+			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
+			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+		};
+		setLayoutCreateInfo.pBindings = setLayoutBindings.data();
+		setLayoutCreateInfo.bindingCount = setLayoutBindings.size();
+		resources.descriptorSetLayouts->add("skysphere", setLayoutCreateInfo);
+		pipelineLayoutCreateInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("skysphere");
+		resources.pipelineLayouts->add("skysphere", pipelineLayoutCreateInfo);
+		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("skysphere");
+		targetDS = resources.descriptorSets->add("skysphere", descriptorAllocInfo);
+		VkDescriptorImageInfo imgDesc;
+		imgDesc = resources.textures->get("skysphere").descriptor;
+		writeDescriptorSets = {
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imgDesc),
+		};
+		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+
 	}
 
 	void preparePipelines()
@@ -1974,6 +2004,12 @@ public:
 		specializationData.discard = 1;
 		resources.pipelines->addGraphicsPipeline("scene.blend", pipelineCreateInfo, pipelineCache);
 
+		// skysphere
+		shaderStages[0] = loadShader(getAssetPath() + "shaders/skysphere.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = loadShader(getAssetPath() + "shaders/skysphere.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		pipelineCreateInfo.layout = resources.pipelineLayouts->get("skysphere");
+		resources.pipelines->addGraphicsPipeline("skysphere", pipelineCreateInfo, pipelineCache);
+
 		// SSAO
 		colorBlendState.attachmentCount = 1;
 
@@ -1983,8 +2019,6 @@ public:
 		emptyInputState.pVertexAttributeDescriptions = nullptr;
 		emptyInputState.vertexBindingDescriptionCount = 0;
 		emptyInputState.pVertexBindingDescriptions = nullptr;
-		pipelineCreateInfo.pVertexInputState = &emptyInputState;
-
 		pipelineCreateInfo.pVertexInputState = &emptyInputState;
 
 		// SSAO Pass
@@ -2011,7 +2045,6 @@ public:
 			pipelineCreateInfo.layout = resources.pipelineLayouts->get("ssao.generate");
 			resources.pipelines->addGraphicsPipeline("ssao.generate", pipelineCreateInfo, pipelineCache);
 		}
-
 
 		// SSAO blur pass
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/fullscreen.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);

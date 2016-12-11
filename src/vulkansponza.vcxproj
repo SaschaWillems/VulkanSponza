@@ -19,6 +19,7 @@
   <ItemGroup>
     <ClInclude Include="..\base\camera.hpp" />
     <ClInclude Include="..\base\vulkandebug.h" />
+    <ClInclude Include="..\base\vulkandevice.hpp" />
     <ClInclude Include="..\base\vulkanexamplebase.h" />
     <ClInclude Include="..\base\vulkantextoverlay.hpp" />
     <ClInclude Include="..\base\vulkantools.h" />
@@ -32,6 +33,8 @@
     <None Include="..\data\shaders\fullscreen.vert" />
     <None Include="..\data\shaders\mrt.frag" />
     <None Include="..\data\shaders\mrt.vert" />
+    <None Include="..\data\shaders\skysphere.frag" />
+    <None Include="..\data\shaders\skysphere.vert" />
     <None Include="..\data\shaders\ssao.frag" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

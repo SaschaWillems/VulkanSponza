@@ -47,6 +47,9 @@
     <ClInclude Include="..\base\camera.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\base\vulkandevice.hpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\data\shaders\debug.frag">
@@ -74,6 +77,12 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="..\data\shaders\composition.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\skysphere.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\skysphere.vert">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>
