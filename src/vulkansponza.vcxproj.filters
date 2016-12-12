@@ -50,6 +50,9 @@
     <ClInclude Include="..\base\vulkandevice.hpp">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="particlesystem.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\data\shaders\debug.frag">
@@ -83,6 +86,12 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="..\data\shaders\skysphere.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\particle.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\data\shaders\particle.vert">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>

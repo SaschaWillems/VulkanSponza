@@ -22,6 +22,7 @@
 
 #include <vulkan/vulkan.h>
 #include "vulkanexamplebase.h"
+#include "particlesystem.hpp"
 
 #if defined(__ANDROID__)
 #include <android/asset_manager.h>
@@ -199,7 +200,6 @@ public:
 	}
 };
 
-
 struct Resources
 {
 	PipelineLayoutList* pipelineLayouts;
@@ -207,6 +207,7 @@ struct Resources
 	DescriptorSetLayoutList *descriptorSetLayouts;
 	DescriptorSetList * descriptorSets;
 	TextureList *textures;
+	ParticleSystemHolder *particleSystems;
 } resources;
 
 struct SceneMaterial 
@@ -845,6 +846,7 @@ public:
 		glm::mat4 projection;
 		glm::mat4 model;
 		glm::mat4 view;
+		glm::vec2 viewportDim;
 	} uboVS, uboSceneMatrices;
 
 	struct UBOSSAOParams {
@@ -959,6 +961,7 @@ public:
 		delete resources.descriptorSetLayouts;
 		delete resources.descriptorSets;
 		delete resources.textures;
+		delete resources.particleSystems;
 
 		vkDestroySampler(device, colorSampler, nullptr);
 
@@ -997,8 +1000,8 @@ public:
 
 	void loadAssets()
 	{
-		//resources.textures->addCubemap("skysphere", getAssetPath() + "textures/skysphere_darkstormy.ktx", VK_FORMAT_R8G8B8A8_UNORM);
-		//loadMesh(getAssetPath() + "cube.dae", &meshes.skysphere, vertexLayout, 10.0f);
+		resources.textures->addTexture2D("particle.fire", getAssetPath() + "textures/particle_fire.ktx", VK_FORMAT_BC3_UNORM_BLOCK);
+		resources.textures->addTexture2D("particle.smoke", getAssetPath() + "textures/particle_smoke.ktx", VK_FORMAT_BC3_UNORM_BLOCK);
 		resources.textures->addTexture2D("skysphere", getAssetPath() + "textures/skysphere_night.ktx", VK_FORMAT_R8G8B8A8_UNORM);
 		loadMesh(getAssetPath() + "skysphere.dae", &meshes.skysphere, vertexLayout, 1.0f);
 	}
@@ -1587,6 +1590,17 @@ public:
 			vkCmdBindIndexBuffer(drawCmdBuffers[i], meshes.quad.indices.buf, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(drawCmdBuffers[i], 6, 1, 0, 0, 1);
 
+			// Alpha blended objects in separate pass using depht info from deferred pass (particles, etc.)
+
+			// Particle systems
+			for (auto& particleSystem : resources.particleSystems->particleSystems)
+			{
+				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelineLayouts->get("particlesystem"), 0, 1, resources.descriptorSets->getPtr("particlesystem"), 0, NULL);
+				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("particlesystem"));
+				vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &particleSystem->buffer.buffer, offsets);
+				vkCmdDraw(drawCmdBuffers[i], particleSystem->particleCount, 1, 0, 0);
+			}
+
 			vkCmdEndRenderPass(drawCmdBuffers[i]);
 
 			VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers[i]));
@@ -1710,15 +1724,15 @@ public:
 	{
 		std::vector<VkDescriptorPoolSize> poolSizes =
 		{
-			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 9),
-			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 13)
+			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10),
+			vkTools::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16)
 		};
 
 		VkDescriptorPoolCreateInfo descriptorPoolInfo =
 			vkTools::initializers::descriptorPoolCreateInfo(
 				poolSizes.size(),
 				poolSizes.data(),
-				5);
+				6);
 
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 	}
@@ -1761,6 +1775,33 @@ public:
 			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &imageDescriptors[2]),				// Binding 3 : Albedo texture target			
 			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4, &imageDescriptors[3]),				// FS Sampler SSAO blurred
 			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 5, &uniformBuffers.sceneLights.descriptor),		// Binding 4 : Fragment shader uniform buffer
+		};
+		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+
+		// Particle systems
+		setLayoutBindings = {
+			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
+			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
+			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 3),			// FS Position+Depth
+		};
+		setLayoutCreateInfo.pBindings = setLayoutBindings.data();
+		setLayoutCreateInfo.bindingCount = setLayoutBindings.size();
+		resources.descriptorSetLayouts->add("particlesystem", setLayoutCreateInfo);
+		pipelineLayoutCreateInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("particlesystem");
+		resources.pipelineLayouts->add("particlesystem", pipelineLayoutCreateInfo);
+		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("particlesystem");
+		targetDS = resources.descriptorSets->add("particlesystem", descriptorAllocInfo);
+		imageDescriptors = {
+			resources.textures->get("particle.smoke").descriptor,
+			resources.textures->get("particle.fire").descriptor,
+			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[0].view, VK_IMAGE_LAYOUT_GENERAL),
+		};
+		writeDescriptorSets = {
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imageDescriptors[0]),
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &imageDescriptors[1]),
+			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &imageDescriptors[2]),
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
@@ -1828,7 +1869,7 @@ public:
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
-		// skysphere
+		// Skysphere
 		setLayoutBindings = {
 			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
 			vkTools::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
@@ -1847,7 +1888,6 @@ public:
 			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &imgDesc),
 		};
 		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-
 	}
 
 	void preparePipelines()
@@ -1962,6 +2002,31 @@ public:
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		resources.pipelines->addGraphicsPipeline("debugdisplay", pipelineCreateInfo, pipelineCache);
 
+		// Particle systems
+		{
+			inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+			depthStencilState.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+			// Premulitplied alpha
+			blendAttachmentState.blendEnable = VK_TRUE;
+			blendAttachmentState.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+			blendAttachmentState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			blendAttachmentState.colorBlendOp = VK_BLEND_OP_ADD;
+			blendAttachmentState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+			blendAttachmentState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			blendAttachmentState.alphaBlendOp = VK_BLEND_OP_ADD;
+			blendAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+			pipelineCreateInfo.pVertexInputState = &resources.particleSystems->inputState;
+			shaderStages[0] = loadShader(getAssetPath() + "shaders/particle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+			shaderStages[1] = loadShader(getAssetPath() + "shaders/particle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+			pipelineCreateInfo.layout = resources.pipelineLayouts->get("particlesystem");
+			resources.pipelines->addGraphicsPipeline("particlesystem", pipelineCreateInfo, pipelineCache);
+		}
+
+		pipelineCreateInfo.pVertexInputState = &vertices.inputState;
+		inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		blendAttachmentState.blendEnable = VK_FALSE;
+		depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
 		// Fill G-Buffer
 
 		// Set constant parameters via specialization constants
@@ -2006,7 +2071,7 @@ public:
 		specializationData.discard = 1;
 		resources.pipelines->addGraphicsPipeline("scene.blend", pipelineCreateInfo, pipelineCache);
 
-		// skysphere
+		// Skysphere
 		shaderStages[0] = loadShader(getAssetPath() + "shaders/skysphere.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getAssetPath() + "shaders/skysphere.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		pipelineCreateInfo.layout = resources.pipelineLayouts->get("skysphere");
@@ -2158,6 +2223,7 @@ public:
 		uboSceneMatrices.projection = camera.matrices.perspective;
 		uboSceneMatrices.view = camera.matrices.view;
 		uboSceneMatrices.model = glm::mat4();
+		uboSceneMatrices.viewportDim = glm::vec2(width, height);
 
 		uint8_t *pData;
 
@@ -2201,39 +2267,35 @@ public:
 
 		for (int32_t i = 0; i < lightColors.size(); i++)
 		{
-			setupLight(&uboFragmentLights.lights[i], glm::vec3((float)(i - 2.5f) * 50.0f, 10.0f, 0.0f), lightColors[i], 120.0f);
+			setupLight(&uboFragmentLights.lights[i], glm::vec3((float)(i - 2.5f) * 50.0f, -10.0f, 0.0f), lightColors[i], 120.0f);
 		}
 
 		// Dynamic light moving over the floor
-		setupLight(&uboFragmentLights.lights[0], { -sin(glm::radians(360.0f * timer)) * 120.0f , 2.5f, cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f }, glm::vec3(1.0f), 100.0f);
+		setupLight(&uboFragmentLights.lights[0], { -sin(glm::radians(360.0f * timer)) * 120.0f, -2.5f, cos(glm::radians(360.0f * timer * 8.0f)) * 10.0f }, glm::vec3(1.0f), 100.0f);
 
 		// Fire bowls
-		setupLight(&uboFragmentLights.lights[5], { -48.75f, 16.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
-		setupLight(&uboFragmentLights.lights[6], { -48.75f, 16.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
-		// -62.5, 15, -18.5
-		setupLight(&uboFragmentLights.lights[7], { 62.0f, 16.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
-		setupLight(&uboFragmentLights.lights[8], { 62.0f, 16.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
+		setupLight(&uboFragmentLights.lights[5], { -48.75f, -16.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
+		setupLight(&uboFragmentLights.lights[6], { -48.75f, -16.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
+		setupLight(&uboFragmentLights.lights[7], { 62.0f, -16.0f, -17.8f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
+		setupLight(&uboFragmentLights.lights[8], { 62.0f, -16.0f,  18.4f }, { 1.0f, 0.6f, 0.0f }, 45.0f);
 
-		// 112.5 13.6 -42.8
-		setupLight(&uboFragmentLights.lights[9], { 120.0f, 20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
-		setupLight(&uboFragmentLights.lights[10], { 120.0f, 20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
-
-		setupLight(&uboFragmentLights.lights[11], { -110.0f, 20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
-		setupLight(&uboFragmentLights.lights[12], { -110.0f, 20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+		setupLight(&uboFragmentLights.lights[9], { 120.0f, -20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+		setupLight(&uboFragmentLights.lights[10], { 120.0f, -20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+		setupLight(&uboFragmentLights.lights[11], { -110.0f, -20.0f, -43.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
+		setupLight(&uboFragmentLights.lights[12], { -110.0f, -20.0f, 41.75f }, { 1.0f, 0.8f, 0.3f }, 75.0f);
 
 		// Lion eyes
-		setupLight(&uboFragmentLights.lights[13], { -122.0f, 18.0f, -3.2f }, { 1.0f, 0.3f, 0.3f }, 25.0f);
-		setupLight(&uboFragmentLights.lights[14], { -122.0f, 18.0f,  3.2f }, { 0.3f, 1.0f, 0.3f }, 25.0f);
+		setupLight(&uboFragmentLights.lights[13], { -122.0f, -18.0f, -3.2f }, { 1.0f, 0.3f, 0.3f }, 25.0f);
+		setupLight(&uboFragmentLights.lights[14], { -122.0f, -18.0f,  3.2f }, { 0.3f, 1.0f, 0.3f }, 25.0f);
 
-		setupLight(&uboFragmentLights.lights[15], { 135.0f, 18.0f, -3.2f }, { 0.3f, 0.3f, 1.0f }, 25.0f);
-		setupLight(&uboFragmentLights.lights[16], { 135.0f, 18.0f,  3.2f }, { 1.0f, 1.0f, 0.3f }, 25.0f);
+		setupLight(&uboFragmentLights.lights[15], { 135.0f, -18.0f, -3.2f }, { 0.3f, 0.3f, 1.0f }, 25.0f);
+		setupLight(&uboFragmentLights.lights[16], { 135.0f, -18.0f,  3.2f }, { 1.0f, 1.0f, 0.3f }, 25.0f);
 
-		for (int32_t i = 0; i < 17; i++)
+		// Setup particle systems for fire bowls
+		for (uint32_t i = 5; i < 9; i++)
 		{
-			//uboFragmentLights.lights[i].position *= 0.5f;
-			uboFragmentLights.lights[i].position.y *= -1.0f;
+			resources.particleSystems->add(1024, glm::vec3(uboFragmentLights.lights[i].position) + glm::vec3(0.0f, 2.5f, 0.0f), glm::vec3(-2.0f, 0.25f, -2.0f), glm::vec3(2.0f, 4.0f, 2.0f));
 		}
-
 	}
 
 	// Update fragment shader light positions for moving light sources
@@ -2312,6 +2374,12 @@ public:
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
 
 		VulkanExampleBase::submitFrame();
+
+		if (!paused)
+		{
+			resources.particleSystems->update(frameTimer * 0.65f);
+			// todo: nicer sync (perf)
+		}
 	}
 
 	void prepare()
@@ -2325,6 +2393,7 @@ public:
 		resources.descriptorSetLayouts = new DescriptorSetLayoutList(vulkanDevice->logicalDevice);
 		resources.descriptorSets = new DescriptorSetList(vulkanDevice->logicalDevice, descriptorPool);
 		resources.textures = new TextureList(vulkanDevice->logicalDevice, textureLoader);
+		resources.particleSystems = new ParticleSystemHolder(vulkanDevice);
 
 		// todo : sep func
 		deviceMemProps = deviceMemoryProperties;

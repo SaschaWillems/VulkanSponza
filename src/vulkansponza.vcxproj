@@ -23,6 +23,7 @@
     <ClInclude Include="..\base\vulkanexamplebase.h" />
     <ClInclude Include="..\base\vulkantextoverlay.hpp" />
     <ClInclude Include="..\base\vulkantools.h" />
+    <ClInclude Include="particlesystem.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\data\shaders\blur.frag" />
@@ -33,6 +34,8 @@
     <None Include="..\data\shaders\fullscreen.vert" />
     <None Include="..\data\shaders\mrt.frag" />
     <None Include="..\data\shaders\mrt.vert" />
+    <None Include="..\data\shaders\particle.frag" />
+    <None Include="..\data\shaders\particle.vert" />
     <None Include="..\data\shaders\skysphere.frag" />
     <None Include="..\data\shaders\skysphere.vert" />
     <None Include="..\data\shaders\ssao.frag" />
