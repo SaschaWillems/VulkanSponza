@@ -66,7 +66,7 @@ public:
 	{
 		return resources[name];
 	}
-	const T *getPtr(std::string name)
+	T *getPtr(std::string name)
 	{
 		return &resources[name];
 	}
@@ -141,6 +141,14 @@ public:
 	{
 		vkTools::VulkanTexture texture;
 		textureLoader->loadTexture(filename, format, &texture);
+		resources[name] = texture;
+		return texture;
+	}
+
+	vkTools::VulkanTexture addTextureArray(std::string name, std::string filename, VkFormat format)
+	{
+		vkTools::VulkanTexture texture;
+		textureLoader->loadTextureArray(filename, format, &texture);
 		resources[name] = texture;
 		return texture;
 	}
@@ -922,6 +930,7 @@ public:
 	
 	// One sampler for the frame buffer color attachments
 	VkSampler colorSampler;
+	VkSampler particleSampler;
 
 	VkCommandBuffer offScreenCmdBuffer = VK_NULL_HANDLE;
 
@@ -964,6 +973,7 @@ public:
 		delete resources.particleSystems;
 
 		vkDestroySampler(device, colorSampler, nullptr);
+		vkDestroySampler(device, particleSampler, nullptr);
 
 		// Frame buffer attachments
 		for (auto attachment : frameBuffers.offscreen.attachments)
@@ -1000,10 +1010,27 @@ public:
 
 	void loadAssets()
 	{
-		resources.textures->addTexture2D("particle.fire", getAssetPath() + "textures/particle_fire.ktx", VK_FORMAT_BC3_UNORM_BLOCK);
+		resources.textures->addTextureArray("particle.fire", getAssetPath() + "textures/particle_fire.ktx", VK_FORMAT_BC3_UNORM_BLOCK);
 		resources.textures->addTexture2D("particle.smoke", getAssetPath() + "textures/particle_smoke.ktx", VK_FORMAT_BC3_UNORM_BLOCK);
 		resources.textures->addTexture2D("skysphere", getAssetPath() + "textures/skysphere_night.ktx", VK_FORMAT_R8G8B8A8_UNORM);
 		loadMesh(getAssetPath() + "skysphere.dae", &meshes.skysphere, vertexLayout, 1.0f);
+
+		// Create a custom sampler to be used with the particle textures
+		VkSamplerCreateInfo samplerCreateInfo = vkTools::initializers::samplerCreateInfo();
+		samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+		samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+		samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		samplerCreateInfo.addressModeV = samplerCreateInfo.addressModeU;
+		samplerCreateInfo.addressModeW = samplerCreateInfo.addressModeU;
+		samplerCreateInfo.mipLodBias = 0.0f;
+		samplerCreateInfo.compareOp = VK_COMPARE_OP_NEVER;
+		samplerCreateInfo.minLod = 0.0f;
+		samplerCreateInfo.maxLod = resources.textures->get("particle.fire").mipLevels;
+		samplerCreateInfo.maxAnisotropy = 8;
+		samplerCreateInfo.anisotropyEnable = VK_TRUE;
+		samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+		VK_CHECK_RESULT(vkCreateSampler(device, &samplerCreateInfo, nullptr, &particleSampler));
 	}
 
 	// Create a frame buffer attachment
@@ -1793,9 +1820,9 @@ public:
 		descriptorAllocInfo.pSetLayouts = resources.descriptorSetLayouts->getPtr("particlesystem");
 		targetDS = resources.descriptorSets->add("particlesystem", descriptorAllocInfo);
 		imageDescriptors = {
-			resources.textures->get("particle.smoke").descriptor,
-			resources.textures->get("particle.fire").descriptor,
-			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[0].view, VK_IMAGE_LAYOUT_GENERAL),
+			vkTools::initializers::descriptorImageInfo(particleSampler, resources.textures->get("particle.smoke").view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+			vkTools::initializers::descriptorImageInfo(particleSampler, resources.textures->get("particle.fire").view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+			vkTools::initializers::descriptorImageInfo(colorSampler, frameBuffers.offscreen.attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
 		};
 		writeDescriptorSets = {
 			vkTools::initializers::writeDescriptorSet(targetDS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.sceneMatrices.descriptor),
@@ -2294,7 +2321,7 @@ public:
 		// Setup particle systems for fire bowls
 		for (uint32_t i = 5; i < 9; i++)
 		{
-			resources.particleSystems->add(1024, glm::vec3(uboFragmentLights.lights[i].position) + glm::vec3(0.0f, 2.5f, 0.0f), glm::vec3(-2.0f, 0.25f, -2.0f), glm::vec3(2.0f, 4.0f, 2.0f));
+			resources.particleSystems->add(512, glm::vec3(uboFragmentLights.lights[i].position) + glm::vec3(0.0f, 2.5f, 0.0f), glm::vec3(-2.0f, 0.25f, -2.0f), glm::vec3(2.0f, 2.5f, 2.0f));
 		}
 	}
 

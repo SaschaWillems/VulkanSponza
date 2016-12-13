@@ -25,7 +25,7 @@
 
 #define PARTICLE_TYPE_FLAME 0
 #define PARTICLE_TYPE_SMOKE 1
-#define FLAME_RADIUS 2.0f
+#define FLAME_RADIUS 1.0f
 
 class ParticleSystem
 {
@@ -121,6 +121,8 @@ public:
 		particle->pos.z = r * sin(theta) * cos(phi);
 
 		particle->pos += glm::vec4(emitterPos, 0.0f);
+
+		particle->pos.w = rnd(16.0f);
 	}
 
 	void transitionParticle(Particle *particle)
@@ -135,6 +137,7 @@ public:
 				particle->color = glm::vec4(0.15f + rnd(0.25f));
 				particle->pos.x = position.x + (particle->pos.x - position.x) * 0.5f;
 				particle->pos.z = position.z + (particle->pos.z - position.z) * 0.5f;
+				particle->pos.w = rnd(16.0f);
 				particle->vel = glm::vec4(rnd(1.0f) - rnd(1.0f), (minVel.y * 2) + rnd(maxVel.y - minVel.y), rnd(1.0f) - rnd(1.0f), 0.0f);
 				particle->size = 1.0f + rnd(0.5f);
 				particle->rotationSpeed = rnd(1.0f) - rnd(1.0f);

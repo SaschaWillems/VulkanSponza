@@ -4,7 +4,7 @@
 #extension GL_ARB_shading_language_420pack : enable
 
 layout (binding = 1) uniform sampler2D samplerSmoke;
-layout (binding = 2) uniform sampler2D samplerFire;
+layout (binding = 2) uniform sampler2DArray samplerFire;
 layout (binding = 3) uniform sampler2D samplerPositionDepth;
 
 layout (location = 0) in vec4 inColor;
@@ -13,6 +13,7 @@ layout (location = 2) in float inAlpha;
 layout (location = 3) in flat int inType;
 layout (location = 4) in float inRotation;
 layout (location = 5) in vec2 inViewportDim;
+layout (location = 6) in float inArrayPos;
 
 layout (location = 0) out vec4 outColor;
 
@@ -51,7 +52,7 @@ void main ()
 	if (inType == 0) 
 	{
 		// Flame
-		color = texture(samplerFire, rotUV);
+		color = texture(samplerFire, vec3(rotUV, inArrayPos));
 		outColor.a = 0.0;
 	}
 	else

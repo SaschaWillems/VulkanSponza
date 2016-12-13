@@ -16,6 +16,7 @@ layout (location = 2) out float outAlpha;
 layout (location = 3) out flat int outType;
 layout (location = 4) out float outRotation;
 layout (location = 5) out vec2 outViewportDim;
+layout (location = 6) out float outArrayPos;
 
 layout (binding = 0) uniform UBO 
 {
@@ -48,5 +49,6 @@ void main ()
 	float viewportAR = ubo.viewportDim.x / ubo.viewportDim.y;
 	
 	gl_PointSize = (((inSize * 1024.0 * viewportAR) / pointDist) * viewportAR);	
-	
+
+	outArrayPos = inPos.w;	
 }
