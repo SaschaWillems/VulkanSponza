@@ -1446,7 +1446,7 @@ public:
 			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 		}
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.blend"));
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("scene.blend"));
 
 		for (auto mesh : scene->meshes)
 		{
