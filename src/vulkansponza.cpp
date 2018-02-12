@@ -1072,9 +1072,9 @@ public:
 		image.tiling = VK_IMAGE_TILING_OPTIMAL;
 		image.usage = usage | VK_IMAGE_USAGE_SAMPLED_BIT;
 
+		VkDedicatedAllocationImageCreateInfoNV dedicatedImageInfo{ VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_IMAGE_CREATE_INFO_NV };
 		if (enableNVDedicatedAllocation)
 		{
-			VkDedicatedAllocationImageCreateInfoNV dedicatedImageInfo { VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_IMAGE_CREATE_INFO_NV };
 			dedicatedImageInfo.dedicatedAllocation = VK_TRUE;
 			image.pNext = &dedicatedImageInfo;
 		}
@@ -1086,9 +1086,9 @@ public:
 		memAlloc.allocationSize = memReqs.size;
 		memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
+		VkDedicatedAllocationMemoryAllocateInfoNV dedicatedAllocationInfo{ VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_MEMORY_ALLOCATE_INFO_NV };
 		if (enableNVDedicatedAllocation)
 		{
-			VkDedicatedAllocationMemoryAllocateInfoNV dedicatedAllocationInfo { VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_MEMORY_ALLOCATE_INFO_NV };
 			dedicatedAllocationInfo.image = attachment->image;
 			memAlloc.pNext = &dedicatedAllocationInfo;
 		}
@@ -1446,7 +1446,7 @@ public:
 			vkCmdDrawIndexed(offScreenCmdBuffer, mesh.indexCount, 1, 0, 0, 0);
 		}
 
-		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineList->get("scene.blend"));
+		vkCmdBindPipeline(offScreenCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipelines->get("scene.blend"));
 
 		for (auto mesh : scene->meshes)
 		{
@@ -1983,9 +1983,9 @@ public:
 		pipelineCreateInfo.pStages = shaderStages.data();
 		pipelineCreateInfo.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
+		VkPipelineRasterizationStateRasterizationOrderAMD rasterAMD{};
 		if (enableAMDRasterizationOrder)
 		{
-			VkPipelineRasterizationStateRasterizationOrderAMD rasterAMD{};
 			rasterAMD.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD;
 			rasterAMD.rasterizationOrder = VK_RASTERIZATION_ORDER_RELAXED_AMD;
 			rasterizationState.pNext = &rasterAMD;
