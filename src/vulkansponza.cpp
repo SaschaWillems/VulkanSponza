@@ -1,7 +1,7 @@
 /*
 * Vulkan Example - Playground for rendering Crytek's Sponza model (deferred renderer)
 *
-* Copyright (C) 2016 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016~2018 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -43,7 +43,8 @@ std::vector<vkMeshLoader::VertexLayout> vertexLayout =
 	vkMeshLoader::VERTEX_LAYOUT_UV,
 	vkMeshLoader::VERTEX_LAYOUT_COLOR,
 	vkMeshLoader::VERTEX_LAYOUT_NORMAL,
-	vkMeshLoader::VERTEX_LAYOUT_TANGENT
+	vkMeshLoader::VERTEX_LAYOUT_TANGENT,
+	vkMeshLoader::VERTEX_LAYOUT_BITANGENT
 };
 
 struct Vertex
@@ -53,6 +54,7 @@ struct Vertex
 	glm::vec3 color;
 	glm::vec3 normal;
 	glm::vec3 tangent;
+	glm::vec3 bitangent;
 };
 
 template <typename T> 
@@ -413,6 +415,7 @@ private:
 				vertices[i].normal.y = -vertices[i].normal.y;
 				vertices[i].color = glm::vec3(1.0f); // todo : take from material
 				vertices[i].tangent = (hasTangent) ? glm::make_vec3(&aMesh->mTangents[i].x) : glm::vec3(0.0f, 1.0f, 0.0f);
+				vertices[i].bitangent = (hasTangent) ? glm::make_vec3(&aMesh->mBitangents[i].x) : glm::vec3(0.0f, 1.0f, 0.0f);				
 				gVertices.push_back(vertices[i]);
 			}
 
@@ -1644,6 +1647,7 @@ public:
 			float col[3];
 			float normal[3];
 			float tangent[3];
+			float bitangent[3];
 		};
 
 		std::vector<Vertex> vertexBuffer;
@@ -1695,50 +1699,19 @@ public:
 	void setupVertexDescriptions()
 	{
 		// Binding description
-		vertices.bindingDescriptions.resize(1);
-		vertices.bindingDescriptions[0] =
-			vkTools::initializers::vertexInputBindingDescription(
-				VERTEX_BUFFER_BIND_ID,
-				sizeof(Vertex),
-				VK_VERTEX_INPUT_RATE_VERTEX);
+		vertices.bindingDescriptions = {
+			vkTools::initializers::vertexInputBindingDescription(VERTEX_BUFFER_BIND_ID, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX)
+		};
 
 		// Attribute descriptions
-		vertices.attributeDescriptions.resize(5);
-		// Location 0: Position
-		vertices.attributeDescriptions[0] =
-			vkTools::initializers::vertexInputAttributeDescription(
-				VERTEX_BUFFER_BIND_ID,
-				0,
-				VK_FORMAT_R32G32B32_SFLOAT,
-				offsetof(Vertex, pos));
-		// Location 1: Texture coordinates
-		vertices.attributeDescriptions[1] =
-			vkTools::initializers::vertexInputAttributeDescription(
-				VERTEX_BUFFER_BIND_ID,
-				1,
-				VK_FORMAT_R32G32_SFLOAT,
-				offsetof(Vertex, uv));
-		// Location 2: Color
-		vertices.attributeDescriptions[2] =
-			vkTools::initializers::vertexInputAttributeDescription(
-				VERTEX_BUFFER_BIND_ID,
-				2,
-				VK_FORMAT_R32G32B32_SFLOAT,
-				offsetof(Vertex, color));
-		// Location 3: Normal
-		vertices.attributeDescriptions[3] =
-			vkTools::initializers::vertexInputAttributeDescription(
-				VERTEX_BUFFER_BIND_ID,
-				3,
-				VK_FORMAT_R32G32B32_SFLOAT,
-				offsetof(Vertex, normal));
-		// Location 4: Tangent
-		vertices.attributeDescriptions[4] =
-			vkTools::initializers::vertexInputAttributeDescription(
-				VERTEX_BUFFER_BIND_ID,
-				4,
-				VK_FORMAT_R32G32B32_SFLOAT,
-				offsetof(Vertex, tangent));
+		vertices.attributeDescriptions = {
+			vkTools::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)),
+			vkTools::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 1, VK_FORMAT_R32G32_SFLOAT,    offsetof(Vertex, uv)),
+			vkTools::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color)),
+			vkTools::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 3, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)),
+			vkTools::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 4, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, tangent)),
+			vkTools::initializers::vertexInputAttributeDescription(VERTEX_BUFFER_BIND_ID, 5, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, bitangent))
+		};
 
 		vertices.inputState = vkTools::initializers::pipelineVertexInputStateCreateInfo();
 		vertices.inputState.vertexBindingDescriptionCount = vertices.bindingDescriptions.size();

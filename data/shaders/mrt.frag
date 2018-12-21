@@ -1,8 +1,5 @@
 #version 450
 
-#extension GL_ARB_separate_shader_objects : enable
-#extension GL_ARB_shading_language_420pack : enable
-
 layout (binding = 1) uniform sampler2D samplerColor;
 layout (binding = 2) uniform sampler2D samplerSpecular;
 layout (binding = 3) uniform sampler2D samplerNormal;
@@ -12,6 +9,7 @@ layout (location = 1) in vec2 inUV;
 layout (location = 2) in vec3 inColor;
 layout (location = 3) in vec3 inWorldPos;
 layout (location = 4) in vec3 inTangent;
+layout (location = 5) in vec3 inBitangent;
 
 layout (location = 0) out vec4 outPosition;
 layout (location = 1) out vec4 outNormal;
@@ -37,8 +35,8 @@ void main()
 	if (ENABLE_DISCARD == 0)
 	{
 		vec3 N = normalize(inNormal);
+		vec3 B = normalize(inBitangent);
 		vec3 T = normalize(inTangent);
-		vec3 B = cross(N, T);
 		mat3 TBN = mat3(T, B, N);
 		vec3 nm = texture(samplerNormal, inUV).xyz * 2.0 - vec3(1.0);
 		nm = TBN * normalize(nm);
